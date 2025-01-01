@@ -9,10 +9,25 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True)
+    name = Column(String, nullable=True)
     hashed_password = Column(String)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    
     documents = relationship("Document", back_populates="owner")
+    notification_settings = relationship("NotificationSettings", back_populates="user", uselist=False)
+
+class NotificationSettings(Base):
+    __tablename__ = "notification_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True)
+    email_notifications = Column(Boolean, default=True)
+    analysis_complete = Column(Boolean, default=True)
+    document_shared = Column(Boolean, default=True)
+    security_alerts = Column(Boolean, default=True)
+    
+    user = relationship("User", back_populates="notification_settings")
 
 class Document(Base):
     __tablename__ = "documents"
