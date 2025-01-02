@@ -1,16 +1,41 @@
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Union
+from enum import Enum
+
+class DocumentStatus(str, Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+class DocumentType(str, Enum):
+    PDF = "pdf"
+    DOCX = "docx"
+    XLSX = "xlsx"
+    IMAGE = "image"
 
 class DocumentBase(BaseModel):
-    title: str
-    file_type: str
+    name: str
+    type: DocumentType
+
+class DocumentCreate(DocumentBase):
+    pass
 
 class Document(DocumentBase):
     id: int
-    status: str
-    created_at: datetime
+    size: int
+    status: DocumentStatus
+    url: str
     file_path: str
+    metadata: Optional[Dict[str, Any]] = None
+    page_count: Optional[int] = None
+    word_count: Optional[int] = None
+    has_tables: Optional[bool] = None
+    has_images: Optional[bool] = None
+    created_at: datetime
+    uploaded_at: datetime
+    processed_at: Optional[datetime] = None
     owner_id: int
 
     class Config:
@@ -18,7 +43,7 @@ class Document(DocumentBase):
 
 class AnalysisConfig(BaseModel):
     analysis_type: str  # table_detection, text_extraction, etc.
-    options: dict = {}  # Additional analysis options
+    options: Dict[str, Any] = {}
 
 class BatchAnalysisRequest(BaseModel):
     document_ids: List[int]

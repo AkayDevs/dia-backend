@@ -1,8 +1,21 @@
-from sqlalchemy import Boolean, Column, Integer, String, DateTime, ForeignKey, Text
+from sqlalchemy import Boolean, Column, Integer, String, DateTime, ForeignKey, Text, JSON, Enum
 from sqlalchemy.orm import relationship
 from datetime import datetime
+import enum
 
 from .session import Base
+
+class DocumentStatus(str, enum.Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+class DocumentType(str, enum.Enum):
+    PDF = "pdf"
+    DOCX = "docx"
+    XLSX = "xlsx"
+    IMAGE = "image"
 
 class User(Base):
     __tablename__ = "users"
@@ -12,6 +25,7 @@ class User(Base):
     name = Column(String, nullable=True)
     hashed_password = Column(String)
     is_active = Column(Boolean, default=True)
+    is_superuser = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     documents = relationship("Document", back_populates="owner")
@@ -33,14 +47,31 @@ class Document(Base):
     __tablename__ = "documents"
 
     id = Column(Integer, primary_key=True, index=True)
-    title = Column(String, index=True)
+    name = Column(String, index=True)
+    type = Column(String, Enum(DocumentType))
+    size = Column(Integer)  # in bytes
+    status = Column(String, Enum(DocumentStatus), default=DocumentStatus.PENDING)
+    url = Column(String)
     file_path = Column(String)
-    file_type = Column(String)
-    status = Column(String)  # pending, processing, completed, failed
+    metadata = Column(JSON, nullable=True)
+    
+    # File processing metadata
+    page_count = Column(Integer, nullable=True)
+    word_count = Column(Integer, nullable=True)
+    has_tables = Column(Boolean, nullable=True)
+    has_images = Column(Boolean, nullable=True)
+    
+    # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
+    processed_at = Column(DateTime, nullable=True)
+    
+    # User relationship
     owner_id = Column(Integer, ForeignKey("users.id"))
     owner = relationship("User", back_populates="documents")
-    analysis_results = relationship("AnalysisResult", back_populates="document")
+    
+    # Analysis results
+    analysis_results = relationship("AnalysisResult", back_populates="document", cascade="all, delete-orphan")
 
 class AnalysisResult(Base):
     __tablename__ = "analysis_results"

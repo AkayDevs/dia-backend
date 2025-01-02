@@ -1,64 +1,73 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Response
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List
+import os
+import magic
+
 from app.db.session import get_db
 from app.db import models
 from app.core import security
 from app.schemas import documents as doc_schemas
+from app.core.config import settings
+from app.services.document_service import DocumentService
 
 router = APIRouter()
+document_service = DocumentService()
 
-@router.post("/upload", response_model=doc_schemas.Document)
+@router.post("/upload", response_model=doc_schemas.Document, status_code=status.HTTP_201_CREATED)
 async def upload_document(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     current_user: models.User = Depends(security.get_current_user)
 ):
-    """Upload a new document for analysis"""
-    document = await security.create_document(file, current_user, db)
-    return document
+    """Upload a new document"""
+    try:
+        document = await document_service.create_document(file, current_user.id, db)
+        return document
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
 
-@router.post("/batch-upload", response_model=List[doc_schemas.Document])
-async def batch_upload_documents(
-    files: List[UploadFile] = File(...),
-    db: AsyncSession = Depends(get_db),
-    current_user: models.User = Depends(security.get_current_user)
-):
-    """Upload multiple documents at once"""
-    documents = []
-    for file in files:
-        document = await security.create_document(file, current_user, db)
-        documents.append(document)
-    return documents
-
-@router.get("/list", response_model=List[doc_schemas.Document])
-async def list_documents(
-    db: AsyncSession = Depends(get_db),
-    current_user: models.User = Depends(security.get_current_user)
-):
-    """List all documents for current user"""
-    query = select(models.Document).where(models.Document.owner_id == current_user.id)
-    result = await db.execute(query)
-    documents = result.scalars().all()
-    return documents
-
-@router.post("/{document_id}/analyze", response_model=doc_schemas.AnalysisResult)
-async def analyze_document(
+@router.get("/{document_id}", response_model=doc_schemas.Document)
+async def get_document(
     document_id: int,
-    analysis_config: doc_schemas.AnalysisConfig,
     db: AsyncSession = Depends(get_db),
     current_user: models.User = Depends(security.get_current_user)
 ):
-    """Start document analysis"""
-    document = await security.get_document(document_id, current_user, db)
+    """Get a specific document"""
+    document = await document_service.get_document(document_id, current_user.id, db)
     if not document:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found"
         )
-    analysis = await security.create_analysis(document, analysis_config, db)
-    return analysis
+    return document
+
+@router.get("/", response_model=List[doc_schemas.Document])
+async def list_documents(
+    db: AsyncSession = Depends(get_db),
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """List all documents for current user"""
+    documents = await document_service.get_user_documents(current_user.id, db)
+    return documents
+
+@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_document(
+    document_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """Delete a document"""
+    success = await document_service.delete_document(document_id, current_user.id, db)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found"
+        )
 
 @router.post("/batch-analyze", response_model=List[doc_schemas.AnalysisResult])
 async def batch_analyze_documents(
@@ -69,9 +78,13 @@ async def batch_analyze_documents(
     """Start analysis for multiple documents"""
     results = []
     for doc_id in analysis_request.document_ids:
-        document = await security.get_document(doc_id, current_user, db)
+        document = await document_service.get_document(doc_id, current_user.id, db)
         if document:
-            analysis = await security.create_analysis(document, analysis_request.analysis_config, db)
+            analysis = await document_service.create_analysis(
+                document, 
+                analysis_request.analysis_config, 
+                db
+            )
             results.append(analysis)
     return results
 
@@ -101,19 +114,6 @@ async def get_analysis_parameters():
         }
     }
 
-@router.get("/history", response_model=List[doc_schemas.AnalysisResult])
-async def get_analysis_history(
-    db: AsyncSession = Depends(get_db),
-    current_user: models.User = Depends(security.get_current_user)
-):
-    """Get analysis history for current user"""
-    query = select(models.AnalysisResult).join(models.Document).where(
-        models.Document.owner_id == current_user.id
-    )
-    result = await db.execute(query)
-    history = result.scalars().all()
-    return history
-
 @router.post("/export", response_model=doc_schemas.ExportResponse)
 async def export_results(
     export_request: doc_schemas.ExportRequest,
@@ -121,31 +121,10 @@ async def export_results(
     current_user: models.User = Depends(security.get_current_user)
 ):
     """Export analysis results in specified format"""
-    export_data = await security.generate_export(
+    export_data = await document_service.generate_export(
         export_request.document_ids,
         export_request.format,
         current_user,
         db
     )
-    return export_data
-
-@router.get("/results/{document_id}", response_model=doc_schemas.AnalysisResult)
-async def get_analysis_results(
-    document_id: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: models.User = Depends(security.get_current_user)
-):
-    """Get analysis results for a specific document"""
-    document = await security.get_document(document_id, current_user, db)
-    if not document:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found"
-        )
-    result = await security.get_latest_analysis(document, db)
-    if not result:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No analysis results found"
-        )
-    return result 
+    return export_data 
