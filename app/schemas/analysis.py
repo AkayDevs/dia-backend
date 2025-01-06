@@ -1,20 +1,26 @@
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, ConfigDict
 import enum
 from datetime import datetime
 
 
 class AnalysisStatus(str, enum.Enum):
+    """Status of document analysis."""
     PENDING = "pending"
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
 
+
 class AnalysisType(str, enum.Enum):
+    """Types of analysis supported by the system."""
     TABLE_DETECTION = "table_detection"
     TEXT_EXTRACTION = "text_extraction"
     TEXT_SUMMARIZATION = "text_summarization"
     TEMPLATE_CONVERSION = "template_conversion"
+    DOCUMENT_CLASSIFICATION = "document_classification"
+    ENTITY_EXTRACTION = "entity_extraction"
+    DOCUMENT_COMPARISON = "document_comparison"
 
 
 class AnalysisParameters(BaseModel):
@@ -30,6 +36,8 @@ class AnalysisParameters(BaseModel):
         ge=1,
         description="Maximum number of results to return"
     )
+
+    model_config = ConfigDict(extra="allow")
 
 
 class TableDetectionParameters(AnalysisParameters):
@@ -72,11 +80,18 @@ class TextSummarizationParameters(AnalysisParameters):
         description="Minimum length of the summary in words"
     )
 
+    @validator("min_length")
+    def validate_min_length(cls, v, values):
+        if "max_length" in values and v >= values["max_length"]:
+            raise ValueError("min_length must be less than max_length")
+        return v
+
 
 class TemplateConversionParameters(AnalysisParameters):
     """Parameters specific to template conversion."""
     target_format: str = Field(
         default="docx",
+        pattern="^(docx|pdf)$",
         description="Target format for conversion"
     )
     preserve_styles: bool = Field(
@@ -117,6 +132,7 @@ class DocumentComparisonParameters(AnalysisParameters):
     )
     comparison_type: str = Field(
         default="content",
+        pattern="^(content|structure|visual)$",
         description="Type of comparison to perform"
     )
     include_visual_diff: bool = Field(
@@ -141,7 +157,6 @@ class AnalysisRequest(BaseModel):
         if not analysis_type:
             return v
 
-        # Map analysis types to their parameter validators
         parameter_models = {
             AnalysisType.TABLE_DETECTION: TableDetectionParameters,
             AnalysisType.TEXT_EXTRACTION: TextExtractionParameters,
@@ -152,54 +167,94 @@ class AnalysisRequest(BaseModel):
             AnalysisType.DOCUMENT_COMPARISON: DocumentComparisonParameters,
         }
 
-        # Validate parameters using the appropriate model
         model = parameter_models.get(analysis_type)
         if model:
             return model(**v).model_dump()
         return v
 
+    class Config:
+        @staticmethod
+        def schema_extra(schema: dict) -> None:
+            schema["example"] = {
+                "document_id": "550e8400-e29b-41d4-a716-446655440000",
+                "analysis_type": "text_extraction",
+                "parameters": {
+                    "confidence_threshold": 0.7,
+                    "extract_layout": True,
+                    "detect_lists": True
+                }
+            }
+
 
 class AnalysisResult(BaseModel):
     """Base schema for analysis results."""
-    id: str
-    document_id: str
-    analysis_type: AnalysisType
-    status: AnalysisStatus
-    parameters: Dict[str, Any]
-    result: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-    created_at: datetime
-    completed_at: Optional[datetime] = None
+    id: str = Field(..., description="Result unique identifier")
+    document_id: str = Field(..., description="ID of the analyzed document")
+    type: AnalysisType = Field(..., description="Type of analysis performed")
+    status: AnalysisStatus = Field(..., description="Analysis status")
+    parameters: Dict[str, Any] = Field(..., description="Parameters used for analysis")
+    result: Optional[Dict[str, Any]] = Field(None, description="Analysis results")
+    error: Optional[str] = Field(None, description="Error message if analysis failed")
+    created_at: datetime = Field(..., description="When analysis was started")
+    completed_at: Optional[datetime] = Field(None, description="When analysis completed")
+
+    model_config = ConfigDict(from_attributes=True)
 
     class Config:
-        from_attributes = True
+        @staticmethod
+        def schema_extra(schema: dict) -> None:
+            schema["example"] = {
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "document_id": "123e4567-e89b-12d3-a456-426614174000",
+                "type": "text_extraction",
+                "status": "completed",
+                "parameters": {
+                    "confidence_threshold": 0.7,
+                    "extract_layout": True
+                },
+                "result": {
+                    "text": "Extracted content",
+                    "pages": 5
+                },
+                "created_at": "2024-01-06T12:00:00Z",
+                "completed_at": "2024-01-06T12:01:00Z"
+            }
 
 
+# Type-specific result schemas
 class TableDetectionResult(BaseModel):
     """Result schema for table detection."""
-    tables: List[Dict[str, Any]]
-    page_numbers: List[int]
-    confidence_scores: List[float]
+    tables: List[Dict[str, Any]] = Field(..., description="Detected tables")
+    page_numbers: List[int] = Field(..., description="Pages containing tables")
+    confidence_scores: List[float] = Field(..., description="Detection confidence scores")
+
+    model_config = ConfigDict(extra="allow")
 
 
 class TextExtractionResult(BaseModel):
     """Result schema for text extraction."""
-    text: str
-    pages: List[Dict[str, Any]]
-    metadata: Dict[str, Any]
+    text: str = Field(..., description="Extracted text content")
+    pages: List[Dict[str, Any]] = Field(..., description="Page-wise content")
+    metadata: Dict[str, Any] = Field(..., description="Extraction metadata")
+
+    model_config = ConfigDict(extra="allow")
 
 
 class TextSummarizationResult(BaseModel):
     """Result schema for text summarization."""
-    summary: str
-    original_length: int
-    summary_length: int
-    key_points: List[str]
+    summary: str = Field(..., description="Generated summary")
+    original_length: int = Field(..., description="Original text length in words")
+    summary_length: int = Field(..., description="Summary length in words")
+    key_points: List[str] = Field(..., description="Extracted key points")
+
+    model_config = ConfigDict(extra="allow")
 
 
 class TemplateConversionResult(BaseModel):
     """Result schema for template conversion."""
-    converted_file_url: str
-    original_format: str
-    target_format: str
-    conversion_metadata: Dict[str, Any] 
+    converted_file_url: str = Field(..., description="URL to converted file")
+    original_format: str = Field(..., description="Original file format")
+    target_format: str = Field(..., description="Target file format")
+    conversion_metadata: Dict[str, Any] = Field(..., description="Conversion metadata")
+
+    model_config = ConfigDict(extra="allow") 
