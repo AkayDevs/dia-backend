@@ -1,7 +1,8 @@
 import logging
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Union, List
 from sqlalchemy.orm import Session
 import uuid
+from datetime import datetime
 
 from app.core.security import get_password_hash, verify_password
 from app.crud.base import CRUDBase
@@ -27,6 +28,8 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
             avatar=obj_in.avatar if hasattr(obj_in, 'avatar') else None,
             is_active=True,
             is_verified=False,  # Regular users need verification
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
         )
         db.add(db_obj)
         db.commit()
@@ -47,6 +50,7 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
             del update_data["password"]
             update_data["hashed_password"] = hashed_password
             
+        update_data["updated_at"] = datetime.utcnow()
         return super().update(db, db_obj=db_obj, obj_in=update_data)
 
     def authenticate(self, db: Session, *, email: str, password: str) -> Optional[User]:
@@ -59,6 +63,15 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
             return None
             
         return user
+
+    def get_user_documents(
+        self, db: Session, *, user_id: str, skip: int = 0, limit: int = 100
+    ) -> List[Any]:
+        """Get all documents for a user with pagination."""
+        user = self.get(db, id=user_id)
+        if not user:
+            return []
+        return user.documents[skip:skip + limit]
 
     def is_active(self, user: User) -> bool:
         """Check if user is active."""
@@ -76,6 +89,7 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
         """Mark user as verified."""
         user.is_verified = True
         user.verification_token = None
+        user.updated_at = datetime.utcnow()
         db.add(user)
         db.commit()
         db.refresh(user)
@@ -86,6 +100,7 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
         user.hashed_password = get_password_hash(password)
         user.password_reset_token = None
         user.password_reset_expires = None
+        user.updated_at = datetime.utcnow()
         db.add(user)
         db.commit()
         db.refresh(user)
