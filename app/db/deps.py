@@ -131,7 +131,7 @@ async def get_current_user(
         token_data = TokenPayload(**payload)
         
         # Check token expiration
-        if datetime.fromtimestamp(token_data.exp) < datetime.now():
+        if token_data.exp < datetime.now():
             logger.warning(f"Expired token used from IP: {client_ip}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
