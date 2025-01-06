@@ -137,24 +137,6 @@ def check_database_state(db: Session) -> None:
         inspector = inspect(db.bind)
         tables = inspector.get_table_names()
         logger.info(f"Tables in database: {tables}")
-        
-        # Check users table
-        if 'users' in tables:
-            users = db.query(User).all()
-            logger.info(f"\nFound {len(users)} users in database:")
-            for user in users:
-                logger.info(f"""
-User Details:
-- ID: {user.id}
-- Email: {user.email}
-- Name: {user.name}
-- Role: {user.role}
-- Active: {user.is_active}
-- Verified: {user.is_verified}
-- Password Hash: {user.hashed_password[:20]}...
-""")
-        else:
-            logger.warning("Users table not found!")
             
     except Exception as e:
         logger.error(f"Error checking database state: {e}")
