@@ -3,8 +3,9 @@ from sqlalchemy.orm import Session
 import uuid
 
 from app.core.config import settings
-from app.core.security import get_password_hash, verify_password
-from app.db.session import Base, engine
+from app.core.security import get_password_hash
+from app.db.session import engine
+from app.db.base_class import Base
 from app.db.models.user import User, UserRole
 
 logger = logging.getLogger(__name__)
