@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple, Optional
 import logging
 from pathlib import Path
 import fitz  # PyMuPDF
@@ -7,6 +7,8 @@ from PIL import Image
 import io
 import cv2
 from collections import defaultdict
+import pytesseract
+import pandas as pd
 
 from app.services.ml.base import BaseTableDetector
 from .image_detector import ImageTableDetector
@@ -242,25 +244,430 @@ class PDFTableDetector(BaseTableDetector):
             logger.warning("Defaulting to rule-based detection only")
             return False
 
+    def _extract_table_data(
+        self,
+        page: fitz.Page,
+        table: Dict[str, Any],
+        enhance_image: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Extract structured data from a detected table.
+        
+        Args:
+            page: PDF page containing the table
+            table: Detected table information with coordinates
+            enhance_image: Whether to enhance image for better OCR
+            
+        Returns:
+            Dictionary containing structured table data
+        """
+        try:
+            # Get table region coordinates
+            coords = table["coordinates"]
+            rect = fitz.Rect(
+                coords["x1"],
+                coords["y1"],
+                coords["x2"],
+                coords["y2"]
+            )
+            
+            # Extract text blocks in the table region
+            text_blocks = []
+            for block in page.get_text("dict", clip=rect)["blocks"]:
+                if block.get("type") == 0:  # Text block
+                    for line in block.get("lines", []):
+                        for span in line.get("spans", []):
+                            text_blocks.append({
+                                "text": span["text"],
+                                "bbox": span["bbox"],
+                                "font_size": span["size"],
+                                "font": span.get("font", ""),
+                                "is_bold": "bold" in span.get("font", "").lower()
+                            })
+            
+            if not text_blocks:
+                # If no vector text found, try OCR
+                return self._extract_table_data_ocr(page, table, enhance_image)
+            
+            # Sort blocks by position
+            text_blocks.sort(key=lambda x: (x["bbox"][1], x["bbox"][0]))  # Sort by y, then x
+            
+            # Analyze table structure
+            structure = self._analyze_table_structure(text_blocks, table)
+            
+            # Extract and organize data
+            data = self._organize_table_data(text_blocks, structure)
+            
+            return {
+                "structure": structure,
+                "data": data
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to extract table data: {str(e)}")
+            return {"error": str(e)}
+
+    def _extract_table_data_ocr(
+        self,
+        page: fitz.Page,
+        table: Dict[str, Any],
+        enhance_image: bool = True
+    ) -> Dict[str, Any]:
+        """Extract table data using OCR when vector text is not available."""
+        try:
+            # Get table region
+            coords = table["coordinates"]
+            rect = fitz.Rect(
+                coords["x1"],
+                coords["y1"],
+                coords["x2"],
+                coords["y2"]
+            )
+            
+            # Convert region to image
+            zoom = 2  # Increase resolution for better OCR
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat, clip=rect)
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            
+            if enhance_image:
+                img = self._enhance_image_for_ocr(img)
+            
+            # Perform OCR with table structure recognition
+            ocr_data = pytesseract.image_to_data(
+                img,
+                output_type=pytesseract.Output.DICT,
+                config='--psm 6'  # Assume uniform block of text
+            )
+            
+            # Convert OCR data to structured format
+            text_blocks = []
+            for i in range(len(ocr_data["text"])):
+                if ocr_data["conf"][i] > 30:  # Filter low confidence results
+                    text_blocks.append({
+                        "text": ocr_data["text"][i],
+                        "bbox": (
+                            ocr_data["left"][i] / zoom + coords["x1"],
+                            ocr_data["top"][i] / zoom + coords["y1"],
+                            (ocr_data["left"][i] + ocr_data["width"][i]) / zoom + coords["x1"],
+                            (ocr_data["top"][i] + ocr_data["height"][i]) / zoom + coords["y1"]
+                        ),
+                        "confidence": ocr_data["conf"][i]
+                    })
+            
+            # Analyze structure and organize data
+            structure = self._analyze_table_structure(text_blocks, table)
+            data = self._organize_table_data(text_blocks, structure)
+            
+            return {
+                "structure": structure,
+                "data": data,
+                "ocr_used": True
+            }
+            
+        except Exception as e:
+            logger.error(f"OCR extraction failed: {str(e)}")
+            return {"error": str(e)}
+
+    def _enhance_image_for_ocr(self, img: Image.Image) -> Image.Image:
+        """Enhance image for better OCR results."""
+        try:
+            # Convert to OpenCV format
+            img_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+            
+            # Convert to grayscale
+            gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+            
+            # Apply adaptive thresholding
+            binary = cv2.adaptiveThreshold(
+                gray, 255,
+                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY,
+                11, 2
+            )
+            
+            # Denoise
+            denoised = cv2.fastNlMeansDenoising(binary)
+            
+            # Convert back to PIL
+            return Image.fromarray(cv2.cvtColor(denoised, cv2.COLOR_BGR2RGB))
+            
+        except Exception as e:
+            logger.warning(f"Image enhancement failed: {str(e)}")
+            return img
+
+    def _analyze_table_structure(
+        self,
+        text_blocks: List[Dict[str, Any]],
+        table: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Analyze table structure from text blocks."""
+        # Get table boundaries
+        coords = table["coordinates"]
+        table_width = coords["x2"] - coords["x1"]
+        table_height = coords["y2"] - coords["y1"]
+        
+        # Find rows by clustering y-coordinates
+        y_coords = [block["bbox"][1] for block in text_blocks]
+        rows = self._cluster_coordinates(y_coords, table_height * 0.02)  # 2% threshold
+        
+        # Find columns by clustering x-coordinates
+        x_coords = [block["bbox"][0] for block in text_blocks]
+        columns = self._cluster_coordinates(x_coords, table_width * 0.02)  # 2% threshold
+        
+        # Detect headers
+        header_row = self._detect_header_row(text_blocks, rows[0] if rows else None)
+        
+        # Analyze column types
+        column_types = self._analyze_column_types(text_blocks, columns)
+        
+        return {
+            "dimensions": {
+                "rows": len(rows),
+                "cols": len(columns)
+            },
+            "has_header": header_row is not None,
+            "header_row": header_row,
+            "row_positions": rows,
+            "column_positions": columns,
+            "column_types": column_types
+        }
+
+    def _cluster_coordinates(
+        self,
+        coords: List[float],
+        threshold: float
+    ) -> List[float]:
+        """Cluster coordinates to find rows/columns."""
+        if not coords:
+            return []
+            
+        # Sort coordinates
+        sorted_coords = sorted(coords)
+        clusters = [[sorted_coords[0]]]
+        
+        # Cluster coordinates
+        for coord in sorted_coords[1:]:
+            if coord - clusters[-1][-1] > threshold:
+                clusters.append([])
+            clusters[-1].append(coord)
+        
+        # Return average position for each cluster
+        return [sum(cluster) / len(cluster) for cluster in clusters]
+
+    def _detect_header_row(
+        self,
+        text_blocks: List[Dict[str, Any]],
+        first_row_y: Optional[float]
+    ) -> Optional[int]:
+        """Detect if first row is a header."""
+        if not first_row_y:
+            return None
+            
+        # Get blocks in first row
+        first_row_blocks = [
+            block for block in text_blocks
+            if abs(block["bbox"][1] - first_row_y) < 5
+        ]
+        
+        # Check for header indicators
+        header_indicators = 0
+        for block in first_row_blocks:
+            if (
+                block.get("is_bold") or
+                block.get("font_size", 0) > 0  # Larger font
+            ):
+                header_indicators += 1
+        
+        return 0 if header_indicators > len(first_row_blocks) / 2 else None
+
+    def _analyze_column_types(
+        self,
+        text_blocks: List[Dict[str, Any]],
+        columns: List[float]
+    ) -> Dict[int, Dict[str, Any]]:
+        """Analyze data types for each column."""
+        column_values = defaultdict(list)
+        
+        # Group values by column
+        for block in text_blocks:
+            col_idx = self._get_column_index(block["bbox"][0], columns)
+            if col_idx is not None:
+                column_values[col_idx].append(block["text"])
+        
+        # Analyze each column
+        column_types = {}
+        for col_idx, values in column_values.items():
+            column_types[col_idx] = self._determine_column_type(values)
+        
+        return column_types
+
+    def _get_column_index(
+        self,
+        x: float,
+        columns: List[float]
+    ) -> Optional[int]:
+        """Get column index for an x-coordinate."""
+        for i, col_x in enumerate(columns):
+            if abs(x - col_x) < 20:  # 20px threshold
+                return i
+        return None
+
+    def _determine_column_type(
+        self,
+        values: List[str]
+    ) -> Dict[str, Any]:
+        """Determine the type of data in a column."""
+        if not values:
+            return {"type": "unknown", "confidence": 0.0}
+        
+        numeric_count = 0
+        date_count = 0
+        total = len(values)
+        
+        for value in values:
+            # Try numeric
+            try:
+                float(value.replace(',', ''))
+                numeric_count += 1
+                continue
+            except ValueError:
+                pass
+            
+            # Try date
+            try:
+                pd.to_datetime(value)
+                date_count += 1
+            except (ValueError, TypeError):
+                pass
+        
+        # Determine type
+        if numeric_count / total > 0.8:
+            return {
+                "type": "numeric",
+                "confidence": numeric_count / total,
+                "format": "integer" if all('.' not in v for v in values) else "float"
+            }
+        elif date_count / total > 0.8:
+            return {
+                "type": "date",
+                "confidence": date_count / total
+            }
+        
+        return {
+            "type": "text",
+            "confidence": 1.0
+        }
+
+    def _organize_table_data(
+        self,
+        text_blocks: List[Dict[str, Any]],
+        structure: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Organize extracted text into structured table data."""
+        rows = structure["row_positions"]
+        cols = structure["column_positions"]
+        has_header = structure["has_header"]
+        
+        # Initialize data structure
+        data = {
+            "headers": [] if has_header else None,
+            "data": []
+        }
+        
+        # Create grid for data organization
+        grid = [[[] for _ in cols] for _ in rows]
+        
+        # Place blocks in grid
+        for block in text_blocks:
+            row_idx = self._get_row_index(block["bbox"][1], rows)
+            col_idx = self._get_column_index(block["bbox"][0], cols)
+            
+            if row_idx is not None and col_idx is not None:
+                grid[row_idx][col_idx].append(block)
+        
+        # Extract headers if present
+        if has_header and grid:
+            data["headers"] = [
+                {
+                    "text": " ".join(block["text"] for block in cell),
+                    "formatting": {
+                        "is_bold": any(block.get("is_bold", False) for block in cell),
+                        "font_size": max((block.get("font_size", 0) for block in cell), default=0)
+                    }
+                }
+                for cell in grid[0]
+            ]
+        
+        # Extract data rows
+        start_row = 1 if has_header else 0
+        for row in grid[start_row:]:
+            row_data = []
+            for cell in row:
+                cell_text = " ".join(block["text"] for block in cell)
+                row_data.append({
+                    "text": cell_text,
+                    "value": self._convert_value(
+                        cell_text,
+                        structure["column_types"].get(len(row_data))
+                    )
+                })
+            data["data"].append(row_data)
+        
+        return data
+
+    def _get_row_index(
+        self,
+        y: float,
+        rows: List[float]
+    ) -> Optional[int]:
+        """Get row index for a y-coordinate."""
+        for i, row_y in enumerate(rows):
+            if abs(y - row_y) < 10:  # 10px threshold
+                return i
+        return None
+
+    def _convert_value(
+        self,
+        text: str,
+        column_type: Optional[Dict[str, Any]]
+    ) -> Any:
+        """Convert text to appropriate data type."""
+        if not column_type or not text:
+            return text
+            
+        try:
+            if column_type["type"] == "numeric":
+                return float(text.replace(',', ''))
+            elif column_type["type"] == "date":
+                return pd.to_datetime(text).isoformat()
+            return text
+        except (ValueError, TypeError):
+            return text
+
     def detect_tables(
-        self, 
-        file_path: str, 
+        self,
+        file_path: str,
         confidence_threshold: float = 0.5,
         min_row_count: int = 2,
         use_ml_detection: bool = True,
+        extract_data: bool = True,
+        enhance_image: bool = True,
         **kwargs
     ) -> List[Dict[str, Any]]:
         """
-        Detect tables in a PDF document using hybrid approach.
+        Detect and extract tables from a PDF document.
         
         Args:
             file_path: Path to the PDF file
             confidence_threshold: Minimum confidence score for ML detections
             min_row_count: Minimum number of rows to consider as table
-            use_ml_detection: Whether to use ML-based detection in addition to rule-based
+            use_ml_detection: Whether to use ML-based detection
+            extract_data: Whether to extract table data
+            enhance_image: Whether to enhance images for OCR
             
         Returns:
-            List of detected tables with their properties
+            List of detected tables with their properties and data
         """
         logger.debug(f"Detecting tables in PDF: {file_path}")
         
@@ -280,74 +687,38 @@ class PDFTableDetector(BaseTableDetector):
                 page_tables = []
                 
                 try:
-                    # 1. Rule-based detection using lines
-                    lines = self._detect_lines(page)
-                    rule_based_tables = self._find_intersections(lines)
-                    page_tables.extend(rule_based_tables)
+                    # Detect tables
+                    tables = super().detect_tables(
+                        page,
+                        confidence_threshold,
+                        min_row_count,
+                        use_ml_detection
+                    )
                     
-                    # 2. ML-based detection (if enabled and suitable)
-                    if use_ml_detection:
-                        try:
-                            # Convert page to image with higher resolution for better detection
-                            zoom = 2  # Increase if needed for better detection
-                            mat = fitz.Matrix(zoom, zoom)
-                            pix = page.get_pixmap(matrix=mat, alpha=False)
-                            
-                            # Convert to PIL Image
-                            try:
-                                img_data = pix.samples
-                                img = Image.frombytes("RGB", [pix.width, pix.height], img_data)
-                                
-                                # Save temporary image
-                                img_bytes = io.BytesIO()
-                                img.save(img_bytes, format='PNG')
-                                img_bytes.seek(0)
-                                
-                                # Detect tables using ML
-                                ml_tables = self.image_detector.detect_tables(
-                                    img_bytes,
-                                    confidence_threshold=confidence_threshold
-                                )
-                                page_tables.extend(ml_tables)
-                                
-                            except ValueError as e:
-                                logger.warning(f"Failed to convert page {page_num + 1} to image: {str(e)}")
-                                logger.warning("Falling back to rule-based detection only")
-                                
-                        except Exception as e:
-                            logger.warning(f"ML detection failed for page {page_num + 1}: {str(e)}")
-                            logger.warning("Continuing with rule-based detection only")
+                    # Extract data if requested
+                    if extract_data:
+                        for table in tables:
+                            table_data = self._extract_table_data(
+                                page,
+                                table,
+                                enhance_image
+                            )
+                            table.update(table_data)
                     
-                    # 3. Merge overlapping detections
-                    merged_tables = self._merge_overlapping_tables(page_tables)
-                    
-                    # 4. Filter small tables
-                    filtered_tables = [
-                        table for table in merged_tables
-                        if table["height"] > 20 and table["width"] > 50  # Minimum size
-                    ]
-                    
-                    # Add page number and sort by position
-                    for table in filtered_tables:
-                        table["page_number"] = page_num + 1
-                        
-                    all_tables.extend(filtered_tables)
+                    page_tables.extend(tables)
                     
                 except Exception as e:
                     logger.error(f"Error processing page {page_num + 1}: {str(e)}")
-                    logger.error("Skipping this page and continuing with next")
                     continue
-            
-            if not all_tables:
-                logger.warning("No tables detected in the document")
-            else:
-                logger.info(f"Detected {len(all_tables)} tables in PDF")
+                
+                # Add page numbers
+                for table in page_tables:
+                    table["page_number"] = page_num + 1
+                
+                all_tables.extend(page_tables)
             
             return all_tables
             
-        except Exception as e:
-            logger.error(f"PDF table detection failed: {str(e)}")
-            raise
         finally:
             if 'doc' in locals():
                 doc.close()
