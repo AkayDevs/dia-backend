@@ -24,13 +24,10 @@ from pathlib import Path
 from app.core.config import settings
 from app.db import deps
 from app.crud.crud_document import document as crud_document
-from app.crud.crud_analysis import analysis_result as crud_analysis
 from app.schemas.document import (
     Document,
     DocumentCreate,
     DocumentWithAnalysis,
-    AnalysisParameters,
-    AnalysisResult,
     DocumentType
 )
 from app.schemas.analysis import AnalysisStatus
@@ -312,113 +309,4 @@ async def delete_document(
     file_path = Path(settings.UPLOAD_DIR) / document.url.replace("/uploads/", "")
     background_tasks.add_task(lambda: file_path.unlink(missing_ok=True))
 
-    return {"message": "Document deleted successfully"}
-
-
-@router.post("/{document_id}/analyze", response_model=dict)
-async def analyze_document(
-    document_id: str,
-    analysis_params: AnalysisParameters,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_active_verified_user),
-) -> dict:
-    """
-    Start document analysis with specified parameters.
-    
-    Args:
-        document_id: Document ID
-        analysis_params: Analysis parameters
-        background_tasks: Background tasks runner
-        db: Database session
-        current_user: Currently authenticated user
-        
-    Returns:
-        Analysis task details
-        
-    Raises:
-        HTTPException: If document is not found or already being processed
-    """
-    document = crud_document.get_document_with_results(
-        db=db,
-        document_id=document_id,
-        user_id=str(current_user.id),
-    )
-    if not document:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found"
-        )
-
-    if document.status == AnalysisStatus.PROCESSING:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Document is already being processed"
-        )
-
-    # Update document status
-    crud_document.update_status(
-        db=db,
-        document_id=document_id,
-        status=AnalysisStatus.PROCESSING
-    )
-
-    # Create analysis result record
-    result = crud_analysis.create_result(
-        db=db,
-        document_id=document_id,
-        type=analysis_params.type,
-        result={"status": "queued", "params": analysis_params.model_dump()}
-    )
-
-    # TODO: Schedule analysis task in background
-    # background_tasks.add_task(process_analysis, document_id, analysis_params)
-
-    return {
-        "message": "Analysis started",
-        "analysis_id": result.id,
-        "status": "queued"
-    }
-
-
-@router.get("/{document_id}/analysis/{analysis_id}", response_model=AnalysisResult)
-async def get_analysis_result(
-    document_id: str,
-    analysis_id: str,
-    db: Session = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_active_verified_user),
-) -> AnalysisResult:
-    """
-    Get the result of a specific analysis.
-    
-    Args:
-        document_id: Document ID
-        analysis_id: Analysis ID
-        db: Database session
-        current_user: Currently authenticated user
-        
-    Returns:
-        Analysis result
-        
-    Raises:
-        HTTPException: If document or analysis result is not found
-    """
-    document = crud_document.get_document_with_results(
-        db=db,
-        document_id=document_id,
-        user_id=str(current_user.id),
-    )
-    if not document:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found"
-        )
-
-    result = crud_analysis.get(db=db, id=analysis_id)
-    if not result or result.document_id != document_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Analysis result not found"
-        )
-
-    return result 
+    return {"message": "Document deleted successfully"} 
