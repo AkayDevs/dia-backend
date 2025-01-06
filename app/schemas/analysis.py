@@ -172,10 +172,9 @@ class AnalysisRequest(BaseModel):
             return model(**v).model_dump()
         return v
 
-    class Config:
-        @staticmethod
-        def schema_extra(schema: dict) -> None:
-            schema["example"] = {
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
                 "document_id": "550e8400-e29b-41d4-a716-446655440000",
                 "analysis_type": "text_extraction",
                 "parameters": {
@@ -184,6 +183,8 @@ class AnalysisRequest(BaseModel):
                     "detect_lists": True
                 }
             }
+        }
+    )
 
 
 class AnalysisResult(BaseModel):
@@ -198,12 +199,10 @@ class AnalysisResult(BaseModel):
     created_at: datetime = Field(..., description="When analysis was started")
     completed_at: Optional[datetime] = Field(None, description="When analysis completed")
 
-    model_config = ConfigDict(from_attributes=True)
-
-    class Config:
-        @staticmethod
-        def schema_extra(schema: dict) -> None:
-            schema["example"] = {
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
                 "id": "550e8400-e29b-41d4-a716-446655440000",
                 "document_id": "123e4567-e89b-12d3-a456-426614174000",
                 "type": "text_extraction",
@@ -219,6 +218,8 @@ class AnalysisResult(BaseModel):
                 "created_at": "2024-01-06T12:00:00Z",
                 "completed_at": "2024-01-06T12:01:00Z"
             }
+        }
+    )
 
 
 # Type-specific result schemas

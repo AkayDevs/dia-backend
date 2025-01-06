@@ -117,11 +117,10 @@ class UserInDBBase(UserBase):
 
 class User(UserInDBBase):
     """Schema for user response (excludes sensitive fields)."""
-    class Config:
-        @staticmethod
-        def schema_extra(schema: dict) -> None:
-            """Add example to schema."""
-            schema["example"] = {
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
                 "id": "550e8400-e29b-41d4-a716-446655440000",
                 "email": "user@example.com",
                 "name": "John Doe",
@@ -131,7 +130,8 @@ class User(UserInDBBase):
                 "created_at": "2024-01-06T12:00:00Z",
                 "updated_at": "2024-01-06T12:00:00Z"
             }
-
+        }
+    )
 
 class UserWithStats(User):
     """Schema for user with additional statistics."""
@@ -140,11 +140,10 @@ class UserWithStats(User):
     last_login: Optional[datetime] = Field(None, description="Last login timestamp")
     storage_used: int = Field(0, description="Total storage used in bytes")
     
-    class Config:
-        @staticmethod
-        def schema_extra(schema: dict) -> None:
-            """Add example to schema."""
-            schema["example"] = {
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
                 "id": "550e8400-e29b-41d4-a716-446655440000",
                 "email": "user@example.com",
                 "name": "John Doe",
@@ -158,3 +157,5 @@ class UserWithStats(User):
                 "last_login": "2024-01-06T14:00:00Z",
                 "storage_used": 1048576  # 1MB
             } 
+        }
+    )

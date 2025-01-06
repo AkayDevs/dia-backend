@@ -85,6 +85,14 @@ class Settings(BaseSettings):
     RATE_LIMIT_PER_USER: int = 1000  # requests per day
     RATE_LIMIT_BURST: int = 100  # maximum burst size
     RATE_LIMIT_WINDOW: int = 3600  # time window in seconds
+    API_RATE_LIMIT_PER_MINUTE: int = Field(
+        default=60,
+        description="Maximum number of API requests allowed per minute per IP/token combination"
+    )
+    API_RATE_LIMIT_BURST: int = Field(
+        default=100,
+        description="Maximum burst size for rate limiting"
+    )
     
     # Security Headers
     SECURITY_BCRYPT_ROUNDS: int = 12

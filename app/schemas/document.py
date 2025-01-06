@@ -40,13 +40,16 @@ class DocumentUpdate(BaseModel):
     status: Optional[AnalysisStatus] = None
     error_message: Optional[str] = None
 
-    class Config:
-        @staticmethod
-        def schema_extra(schema: dict) -> None:
-            schema["example"] = {
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
                 "name": "updated_name.pdf",
                 "status": "completed"
             }
+        }
+    )
 
 
 class Document(DocumentBase):
@@ -60,10 +63,10 @@ class Document(DocumentBase):
 
     model_config = ConfigDict(from_attributes=True)
 
-    class Config:
-        @staticmethod
-        def schema_extra(schema: dict) -> None:
-            schema["example"] = {
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
                 "id": "550e8400-e29b-41d4-a716-446655440000",
                 "name": "example.pdf",
                 "type": "pdf",
@@ -74,6 +77,8 @@ class Document(DocumentBase):
                 "updated_at": "2024-01-06T12:30:00Z",
                 "user_id": "123e4567-e89b-12d3-a456-426614174000"
             }
+        }
+    )
 
 
 class AnalysisResultBase(BaseModel):
@@ -86,10 +91,10 @@ class AnalysisResultCreate(AnalysisResultBase):
     """Schema for creating analysis results."""
     document_id: str = Field(..., description="Associated document ID")
 
-    class Config:
-        @staticmethod
-        def schema_extra(schema: dict) -> None:
-            schema["example"] = {
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
                 "type": "text_extraction",
                 "document_id": "550e8400-e29b-41d4-a716-446655440000",
                 "result": {
@@ -97,6 +102,8 @@ class AnalysisResultCreate(AnalysisResultBase):
                     "pages": 5
                 }
             }
+        }
+    )
 
 
 class AnalysisResultUpdate(BaseModel):
@@ -112,10 +119,10 @@ class AnalysisResult(AnalysisResultBase):
 
     model_config = ConfigDict(from_attributes=True)
 
-    class Config:
-        @staticmethod
-        def schema_extra(schema: dict) -> None:
-            schema["example"] = {
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
                 "id": "550e8400-e29b-41d4-a716-446655440000",
                 "type": "text_extraction",
                 "document_id": "123e4567-e89b-12d3-a456-426614174000",
@@ -125,7 +132,8 @@ class AnalysisResult(AnalysisResultBase):
                 },
                 "created_at": "2024-01-06T12:00:00Z"
             }
-
+        }
+    )
 
 class DocumentWithAnalysis(Document):
     """Schema for document with its analysis results."""
@@ -136,10 +144,10 @@ class DocumentWithAnalysis(Document):
 
     model_config = ConfigDict(from_attributes=True)
 
-    class Config:
-        @staticmethod
-        def schema_extra(schema: dict) -> None:
-            schema["example"] = {
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
                 "id": "550e8400-e29b-41d4-a716-446655440000",
                 "name": "example.pdf",
                 "type": "pdf",
@@ -161,6 +169,8 @@ class DocumentWithAnalysis(Document):
                     }
                 ]
             }
+        }
+    )
 
 
 # Analysis Parameters Schemas
