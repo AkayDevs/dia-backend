@@ -1,7 +1,15 @@
 from typing import Optional, Any, List
 from pydantic import BaseModel, Field
 from datetime import datetime
-from app.db.models.document import DocumentType, AnalysisStatus, AnalysisType
+from app.schemas.analysis import AnalysisStatus, AnalysisType
+import enum
+
+
+class DocumentType(str, enum.Enum):
+    PDF = "pdf"
+    DOCX = "docx"
+    XLSX = "xlsx"
+    IMAGE = "image"
 
 
 class DocumentBase(BaseModel):

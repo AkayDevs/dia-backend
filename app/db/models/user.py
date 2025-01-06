@@ -1,15 +1,11 @@
-from sqlalchemy import Column, String, DateTime, Enum, Boolean, Index
+from sqlalchemy import String, DateTime, Enum, Boolean, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from typing import List
+
 from app.db.session import Base
-import enum
 from app.db.models.document import Document
-
-
-class UserRole(str, enum.Enum):
-    USER = "user"
-    ADMIN = "admin"
+from app.schemas.user import UserRole
 
 
 class User(Base):

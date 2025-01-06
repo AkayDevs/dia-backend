@@ -1,26 +1,20 @@
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, validator
-from enum import Enum
+import enum
 from datetime import datetime
 
 
-class AnalysisType(str, Enum):
-    """Types of analysis that can be performed."""
-    TABLE_DETECTION = "table_detection"
-    TEXT_EXTRACTION = "text_extraction"
-    TEXT_SUMMARIZATION = "text_summarization"
-    TEMPLATE_CONVERSION = "template_conversion"
-    DOCUMENT_CLASSIFICATION = "document_classification"
-    ENTITY_EXTRACTION = "entity_extraction"
-    DOCUMENT_COMPARISON = "document_comparison"
-
-
-class AnalysisStatus(str, Enum):
-    """Status of an analysis task."""
+class AnalysisStatus(str, enum.Enum):
     PENDING = "pending"
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
+
+class AnalysisType(str, enum.Enum):
+    TABLE_DETECTION = "table_detection"
+    TEXT_EXTRACTION = "text_extraction"
+    TEXT_SUMMARIZATION = "text_summarization"
+    TEMPLATE_CONVERSION = "template_conversion"
 
 
 class AnalysisParameters(BaseModel):

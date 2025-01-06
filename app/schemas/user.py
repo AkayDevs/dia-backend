@@ -1,7 +1,11 @@
 from typing import Optional
 from pydantic import BaseModel, EmailStr, Field, validator
-from app.db.models.user import UserRole
 from datetime import datetime
+import enum
+
+class UserRole(str, enum.Enum):
+    USER = "user"
+    ADMIN = "admin"
 
 
 class UserBase(BaseModel):
