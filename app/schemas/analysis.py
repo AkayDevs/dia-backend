@@ -187,36 +187,44 @@ class AnalysisRequest(BaseModel):
     )
 
 
-class AnalysisResult(BaseModel):
+class AnalysisResultBase(BaseModel):
     """Base schema for analysis results."""
-    id: str = Field(..., description="Result unique identifier")
-    document_id: str = Field(..., description="ID of the analyzed document")
     type: AnalysisType = Field(..., description="Type of analysis performed")
-    status: AnalysisStatus = Field(..., description="Analysis status")
-    parameters: Dict[str, Any] = Field(..., description="Parameters used for analysis")
     result: Optional[Dict[str, Any]] = Field(None, description="Analysis results")
-    error: Optional[str] = Field(None, description="Error message if analysis failed")
-    created_at: datetime = Field(..., description="When analysis was started")
-    completed_at: Optional[datetime] = Field(None, description="When analysis completed")
+
+
+class AnalysisResultCreate(AnalysisResultBase):
+    """Schema for creating a new analysis result."""
+    document_id: str = Field(..., description="ID of the analyzed document")
 
     model_config = ConfigDict(
-        from_attributes=True,
         json_schema_extra={
             "example": {
-                "id": "550e8400-e29b-41d4-a716-446655440000",
-                "document_id": "123e4567-e89b-12d3-a456-426614174000",
                 "type": "text_extraction",
-                "status": "completed",
-                "parameters": {
-                    "confidence_threshold": 0.7,
-                    "extract_layout": True
-                },
+                "document_id": "550e8400-e29b-41d4-a716-446655440000",
                 "result": {
                     "text": "Extracted content",
                     "pages": 5
+                }
+            }
+        }
+    )
+
+
+class AnalysisResultUpdate(BaseModel):
+    """Schema for updating an existing analysis result."""
+    result: Optional[Dict[str, Any]] = Field(None, description="Updated analysis results")
+    status: Optional[AnalysisStatus] = Field(None, description="Updated analysis status")
+    error: Optional[str] = Field(None, description="Error message if analysis failed")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "result": {
+                    "text": "Updated content",
+                    "pages": 6
                 },
-                "created_at": "2024-01-06T12:00:00Z",
-                "completed_at": "2024-01-06T12:01:00Z"
+                "status": "completed"
             }
         }
     )
@@ -258,4 +266,37 @@ class TemplateConversionResult(BaseModel):
     target_format: str = Field(..., description="Target file format")
     conversion_metadata: Dict[str, Any] = Field(..., description="Conversion metadata")
 
-    model_config = ConfigDict(extra="allow") 
+    model_config = ConfigDict(extra="allow")
+
+
+class AnalysisResult(AnalysisResultBase):
+    """Schema for complete analysis result."""
+    id: str = Field(..., description="Result unique identifier")
+    document_id: str = Field(..., description="ID of the analyzed document")
+    status: AnalysisStatus = Field(..., description="Analysis status")
+    parameters: Dict[str, Any] = Field(..., description="Parameters used for analysis")
+    error: Optional[str] = Field(None, description="Error message if analysis failed")
+    created_at: datetime = Field(..., description="When analysis was started")
+    completed_at: Optional[datetime] = Field(None, description="When analysis completed")
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "document_id": "123e4567-e89b-12d3-a456-426614174000",
+                "type": "text_extraction",
+                "status": "completed",
+                "parameters": {
+                    "confidence_threshold": 0.7,
+                    "extract_layout": True
+                },
+                "result": {
+                    "text": "Extracted content",
+                    "pages": 5
+                },
+                "created_at": "2024-01-06T12:00:00Z",
+                "completed_at": "2024-01-06T12:01:00Z"
+            }
+        }
+    ) 
