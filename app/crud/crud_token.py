@@ -1,7 +1,7 @@
 from typing import Optional
 from sqlalchemy.orm import Session
 from datetime import datetime
-from app.models.token import BlacklistedToken
+from app.db.models.token import BlacklistedToken
 from app.schemas.token import BlacklistedToken as BlacklistedTokenSchema
 
 class CRUDToken:
