@@ -1,6 +1,6 @@
-from datetime import timedelta
+from datetime import timedelta, datetime
 from typing import Any
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status, Header
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 import logging
@@ -8,6 +8,7 @@ import logging
 from app.core import security
 from app.core.config import settings
 from app.crud.crud_user import user as crud_user
+from app.crud.crud_token import token as crud_token
 from app.db import deps
 from app.schemas.user import User, UserCreate
 from app.schemas.token import Token
@@ -142,4 +143,41 @@ def verify_email(
             detail="Invalid verification token",
         )
     crud_user.mark_verified(db, user=user)
-    return {"msg": "Email verified successfully"} 
+    return {"msg": "Email verified successfully"}
+
+
+@router.post("/logout")
+async def logout(
+    db: Session = Depends(deps.get_db),
+    authorization: str = Header(...),
+) -> Any:
+    """
+    Logout user by invalidating their JWT token.
+    """
+    try:
+        # Extract token from Authorization header
+        if not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authorization header",
+            )
+        token = authorization.split(" ")[1]
+        
+        # Decode token to get expiry
+        payload = security.decode_token(token)
+        expires_at = datetime.fromtimestamp(payload.get("exp"))
+        
+        # Blacklist the token
+        crud_token.blacklist_token(db, token, expires_at)
+        
+        # Cleanup expired tokens (maintenance)
+        crud_token.cleanup_expired_tokens(db)
+        
+        return {"msg": "Successfully logged out"}
+        
+    except Exception as e:
+        logger.error(f"Logout error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Error processing logout request",
+        ) 

@@ -1,11 +1,13 @@
 from datetime import datetime, timedelta
 from typing import Any, Union, Optional
-from jose import jwt
+from jose import jwt, JWTError
 from passlib.context import CryptContext
 from app.core.config import settings
 import secrets
 import string
 import logging
+from sqlalchemy.orm import Session
+from app.crud.crud_token import token as crud_token
 
 logger = logging.getLogger(__name__)
 
@@ -79,3 +81,27 @@ def verify_password_reset_token(token: str) -> Optional[str]:
         return decoded_token["sub"]
     except jwt.JWTError:
         return None
+
+
+def decode_token(token: str) -> dict:
+    """Decode a JWT token and return its payload."""
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+        return payload
+    except JWTError as e:
+        logger.error(f"Error decoding token: {str(e)}")
+        raise
+
+
+def verify_token(token: str, db: Session) -> bool:
+    """Verify if a token is valid and not blacklisted."""
+    try:
+        payload = decode_token(token)
+        exp = datetime.fromtimestamp(payload.get("exp"))
+        if exp < datetime.utcnow():
+            return False
+        # Check if token is blacklisted
+        return not crud_token.is_blacklisted(db, token)
+    except Exception as e:
+        logger.error(f"Error verifying token: {str(e)}")
+        return False
