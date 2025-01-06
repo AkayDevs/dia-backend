@@ -7,7 +7,13 @@ from datetime import datetime
 
 from app.crud.base import CRUDBase
 from app.db.models.analysis_result import AnalysisResult
-from app.schemas.analysis import AnalysisType, AnalysisResultCreate, AnalysisResultUpdate
+from app.schemas.analysis import (
+    AnalysisType,
+    AnalysisStatus,
+    AnalysisResultCreate,
+    AnalysisResultUpdate,
+    BatchAnalysisDocument
+)
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +24,8 @@ class CRUDAnalysisResult(CRUDBase[AnalysisResult, AnalysisResultCreate, Analysis
         *, 
         document_id: str, 
         analysis_type: AnalysisType,
-        result: Dict[str, Any]
+        parameters: Dict[str, Any],
+        result: Optional[Dict[str, Any]] = None
     ) -> AnalysisResult:
         """Create a new analysis result with proper error handling."""
         try:
@@ -26,7 +33,10 @@ class CRUDAnalysisResult(CRUDBase[AnalysisResult, AnalysisResultCreate, Analysis
                 id=str(uuid.uuid4()),
                 document_id=document_id,
                 type=analysis_type,
+                status=AnalysisStatus.PENDING,
+                parameters=parameters,
                 result=result,
+                progress=0.0,
                 created_at=datetime.utcnow()
             )
             db.add(db_obj)
@@ -38,14 +48,40 @@ class CRUDAnalysisResult(CRUDBase[AnalysisResult, AnalysisResultCreate, Analysis
             logger.error(f"Error creating analysis result: {str(e)}")
             raise
 
+    def create_batch(
+        self,
+        db: Session,
+        *,
+        batch_documents: List[BatchAnalysisDocument]
+    ) -> List[AnalysisResult]:
+        """Create multiple analysis results in a batch."""
+        results = []
+        try:
+            for doc in batch_documents:
+                result = self.create_result(
+                    db,
+                    document_id=doc.document_id,
+                    analysis_type=doc.analysis_type,
+                    parameters=doc.parameters
+                )
+                results.append(result)
+            return results
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error creating batch analysis results: {str(e)}")
+            raise
+
     def get_document_results(
         self, 
         db: Session, 
         *, 
         document_id: str,
-        analysis_type: Optional[AnalysisType] = None
+        analysis_type: Optional[AnalysisType] = None,
+        status: Optional[AnalysisStatus] = None,
+        skip: int = 0,
+        limit: int = 100
     ) -> List[AnalysisResult]:
-        """Get all analysis results for a document with type filtering."""
+        """Get all analysis results for a document with type and status filtering."""
         try:
             query = (
                 db.query(self.model)
@@ -55,7 +91,15 @@ class CRUDAnalysisResult(CRUDBase[AnalysisResult, AnalysisResultCreate, Analysis
             if analysis_type:
                 query = query.filter(AnalysisResult.type == analysis_type)
                 
-            return query.order_by(desc(AnalysisResult.created_at)).all()
+            if status:
+                query = query.filter(AnalysisResult.status == status)
+                
+            return (
+                query.order_by(desc(AnalysisResult.created_at))
+                .offset(skip)
+                .limit(limit)
+                .all()
+            )
         except Exception as e:
             logger.error(f"Error fetching analysis results: {str(e)}")
             raise
@@ -82,6 +126,35 @@ class CRUDAnalysisResult(CRUDBase[AnalysisResult, AnalysisResultCreate, Analysis
             logger.error(f"Error fetching latest analysis result: {str(e)}")
             raise
 
+    def update_progress(
+        self,
+        db: Session,
+        *,
+        analysis_id: str,
+        progress: float,
+        status_message: Optional[str] = None
+    ) -> Optional[AnalysisResult]:
+        """Update analysis progress and status message."""
+        try:
+            analysis = self.get(db, id=analysis_id)
+            if not analysis:
+                logger.warning(f"Analysis not found: {analysis_id}")
+                return None
+
+            update_data = {
+                "progress": min(max(progress, 0.0), 100.0),
+                "status_message": status_message
+            }
+
+            if progress >= 100.0:
+                update_data["status"] = AnalysisStatus.COMPLETED
+                update_data["completed_at"] = datetime.utcnow()
+
+            return self.update(db, db_obj=analysis, obj_in=update_data)
+        except Exception as e:
+            logger.error(f"Error updating analysis progress: {str(e)}")
+            raise
+
     def delete_document_results(
         self,
         db: Session,
@@ -100,6 +173,32 @@ class CRUDAnalysisResult(CRUDBase[AnalysisResult, AnalysisResultCreate, Analysis
         except Exception as e:
             db.rollback()
             logger.error(f"Error deleting analysis results: {str(e)}")
+            raise
+
+    def get_pending_analyses(
+        self,
+        db: Session,
+        *,
+        analysis_type: Optional[AnalysisType] = None,
+        limit: int = 10
+    ) -> List[AnalysisResult]:
+        """Get pending analyses for processing."""
+        try:
+            query = (
+                db.query(self.model)
+                .filter(AnalysisResult.status == AnalysisStatus.PENDING)
+            )
+            
+            if analysis_type:
+                query = query.filter(AnalysisResult.type == analysis_type)
+                
+            return (
+                query.order_by(AnalysisResult.created_at)
+                .limit(limit)
+                .all()
+            )
+        except Exception as e:
+            logger.error(f"Error fetching pending analyses: {str(e)}")
             raise
 
 

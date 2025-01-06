@@ -18,9 +18,6 @@ class AnalysisType(str, enum.Enum):
     TEXT_EXTRACTION = "text_extraction"
     TEXT_SUMMARIZATION = "text_summarization"
     TEMPLATE_CONVERSION = "template_conversion"
-    DOCUMENT_CLASSIFICATION = "document_classification"
-    ENTITY_EXTRACTION = "entity_extraction"
-    DOCUMENT_COMPARISON = "document_comparison"
 
 
 class AnalysisParameters(BaseModel):
@@ -100,46 +97,6 @@ class TemplateConversionParameters(AnalysisParameters):
     )
 
 
-class DocumentClassificationParameters(AnalysisParameters):
-    """Parameters specific to document classification."""
-    model_type: Optional[str] = Field(
-        default=None,
-        description="Specific classification model to use"
-    )
-    include_metadata: bool = Field(
-        default=True,
-        description="Whether to include document metadata in classification"
-    )
-
-
-class EntityExtractionParameters(AnalysisParameters):
-    """Parameters specific to entity extraction."""
-    entity_types: Optional[List[str]] = Field(
-        default=None,
-        description="Types of entities to extract"
-    )
-    include_context: bool = Field(
-        default=True,
-        description="Whether to include surrounding context for entities"
-    )
-
-
-class DocumentComparisonParameters(AnalysisParameters):
-    """Parameters specific to document comparison."""
-    comparison_document_id: str = Field(
-        ...,
-        description="ID of the document to compare against"
-    )
-    comparison_type: str = Field(
-        default="content",
-        pattern="^(content|structure|visual)$",
-        description="Type of comparison to perform"
-    )
-    include_visual_diff: bool = Field(
-        default=True,
-        description="Whether to include visual difference markers"
-    )
-
 
 class AnalysisResultBase(BaseModel):
     """Base schema for analysis results."""
@@ -199,10 +156,7 @@ class AnalysisRequest(BaseModel):
             AnalysisType.TABLE_DETECTION: TableDetectionParameters,
             AnalysisType.TEXT_EXTRACTION: TextExtractionParameters,
             AnalysisType.TEXT_SUMMARIZATION: TextSummarizationParameters,
-            AnalysisType.TEMPLATE_CONVERSION: TemplateConversionParameters,
-            AnalysisType.DOCUMENT_CLASSIFICATION: DocumentClassificationParameters,
-            AnalysisType.ENTITY_EXTRACTION: EntityExtractionParameters,
-            AnalysisType.DOCUMENT_COMPARISON: DocumentComparisonParameters,
+            AnalysisType.TEMPLATE_CONVERSION: TemplateConversionParameters
         }
 
         model = parameter_models.get(analysis_type)

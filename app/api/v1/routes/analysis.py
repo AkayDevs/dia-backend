@@ -14,9 +14,10 @@ from app.schemas.analysis import (
     AnalysisStatus,
     AnalysisParameters,
     BatchAnalysisRequest,
-    BatchAnalysisResponse
+    BatchAnalysisResponse,
+    BatchAnalysisError
 )
-from app.services.analysis import AnalysisService
+from app.services.analysis import AnalysisService, DocumentNotFoundError
 
 router = APIRouter()
 logger = logging.getLogger("app.api.analysis")
@@ -60,10 +61,7 @@ async def create_batch_analysis(
             ).first()
             
             if not document:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Document not found: {doc_request.document_id}"
-                )
+                raise DocumentNotFoundError(f"Document not found: {doc_request.document_id}")
 
             # Create analysis task
             analysis = analysis_service.create_analysis(
@@ -80,11 +78,17 @@ async def create_batch_analysis(
             
             results.append(analysis)
             
+        except DocumentNotFoundError as e:
+            errors.append(BatchAnalysisError(
+                document_id=doc_request.document_id,
+                error=str(e)
+            ))
         except Exception as e:
-            errors.append({
-                "document_id": doc_request.document_id,
-                "error": str(e)
-            })
+            logger.error(f"Error processing document {doc_request.document_id}: {str(e)}")
+            errors.append(BatchAnalysisError(
+                document_id=doc_request.document_id,
+                error="Internal server error"
+            ))
 
     if errors and not results:
         raise HTTPException(
@@ -92,12 +96,12 @@ async def create_batch_analysis(
             detail={"message": "All analysis requests failed", "errors": errors}
         )
 
-    return {
-        "results": results,
-        "errors": errors if errors else None,
-        "total_submitted": len(results),
-        "total_failed": len(errors)
-    }
+    return BatchAnalysisResponse(
+        results=results,
+        errors=errors if errors else None,
+        total_submitted=len(results),
+        total_failed=len(errors)
+    )
 
 
 @router.post("/{document_id}", response_model=AnalysisResult)
@@ -158,11 +162,17 @@ async def create_analysis(
         
         return analysis
         
+    except ValueError as e:
+        logger.error(f"Validation error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
     except Exception as e:
         logger.error(f"Error creating analysis: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Error creating analysis task"
         )
 
 
@@ -208,15 +218,22 @@ async def list_document_analyses(
             detail="Document not found"
         )
     
-    # Get analyses with filters
-    analysis_service = AnalysisService(db)
-    return analysis_service.get_document_analyses(
-        document_id=document_id,
-        analysis_type=analysis_type,
-        status=status,
-        skip=skip,
-        limit=limit
-    )
+    try:
+        # Get analyses with filters
+        analysis_service = AnalysisService(db)
+        return analysis_service.get_document_analyses(
+            document_id=document_id,
+            analysis_type=analysis_type,
+            status=status,
+            skip=skip,
+            limit=limit
+        )
+    except Exception as e:
+        logger.error(f"Error listing analyses: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error retrieving analysis results"
+        )
 
 
 @router.get("/{analysis_id}", response_model=AnalysisResult)
@@ -241,28 +258,37 @@ async def get_analysis(
     """
     logger.info(f"Fetching analysis: {analysis_id}")
     
-    analysis_service = AnalysisService(db)
-    analysis = analysis_service.get_analysis(analysis_id)
-    
-    if not analysis:
+    try:
+        analysis_service = AnalysisService(db)
+        analysis = analysis_service.get_analysis(analysis_id)
+        
+        if not analysis:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Analysis not found"
+            )
+        
+        # Verify document ownership
+        document = db.query(Document).filter(
+            Document.id == analysis.document_id,
+            Document.user_id == current_user.id
+        ).first()
+        
+        if not document:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Analysis not found"
+            )
+        
+        return analysis
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching analysis: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Analysis not found"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error retrieving analysis result"
         )
-    
-    # Verify document ownership
-    document = db.query(Document).filter(
-        Document.id == analysis.document_id,
-        Document.user_id == current_user.id
-    ).first()
-    
-    if not document:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Analysis not found"
-        )
-    
-    return analysis
 
 
 @router.get("/types", response_model=List[dict])
@@ -365,6 +391,74 @@ async def list_analysis_types() -> Any:
                     "type": "boolean",
                     "default": True,
                     "description": "Whether to preserve document styles"
+                }
+            }
+        },
+        {
+            "type": AnalysisType.DOCUMENT_CLASSIFICATION,
+            "name": "Document Classification",
+            "description": "Classify documents into predefined categories",
+            "supported_formats": ["pdf", "docx", "txt"],
+            "parameters": {
+                "confidence_threshold": {
+                    "type": "float",
+                    "default": 0.7,
+                    "min": 0.0,
+                    "max": 1.0,
+                    "description": "Minimum confidence score for classification"
+                },
+                "include_metadata": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Whether to include document metadata in classification"
+                }
+            }
+        },
+        {
+            "type": AnalysisType.ENTITY_EXTRACTION,
+            "name": "Entity Extraction",
+            "description": "Extract named entities from documents",
+            "supported_formats": ["pdf", "docx", "txt"],
+            "parameters": {
+                "confidence_threshold": {
+                    "type": "float",
+                    "default": 0.6,
+                    "min": 0.0,
+                    "max": 1.0,
+                    "description": "Minimum confidence score for entity extraction"
+                },
+                "entity_types": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["person", "organization", "location", "date", "money"]
+                    },
+                    "default": ["person", "organization", "location"],
+                    "description": "Types of entities to extract"
+                },
+                "include_context": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Whether to include surrounding context for entities"
+                }
+            }
+        },
+        {
+            "type": AnalysisType.DOCUMENT_COMPARISON,
+            "name": "Document Comparison",
+            "description": "Compare two documents for similarities and differences",
+            "supported_formats": ["pdf", "docx"],
+            "parameters": {
+                "comparison_type": {
+                    "type": "string",
+                    "default": "content",
+                    "enum": ["content", "structure", "visual"],
+                    "description": "Type of comparison to perform"
+                },
+                "include_visual_diff": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Whether to include visual difference markers"
                 }
             }
         }

@@ -1,117 +1,251 @@
-from typing import Dict, Type, Optional, List
+from typing import Dict, Type, Optional, List, Any
 import logging
 import mimetypes
 from pathlib import Path
+import torch
+from abc import ABC, abstractmethod
 
 from .base import (
     BaseDocumentProcessor,
     BaseTableDetector,
     BaseTextExtractor,
     BaseTextSummarizer,
-    BaseTemplateConverter,
-    BaseDocumentClassifier,
-    BaseEntityExtractor,
-    BaseDocumentComparer
+    BaseTemplateConverter
 )
 
 from .table_detection import ImageTableDetector, PDFTableDetector
+from app.schemas.analysis import AnalysisType, AnalysisStatus
 
 logger = logging.getLogger(__name__)
 
-class BaseProcessorFactory:
-    """Base factory for creating document processor instances."""
-    
-    _processors: Dict[str, Type[BaseDocumentProcessor]] = {}
-    
-    @classmethod
-    def get_supported_formats(cls) -> Dict[str, list]:
-        """Get all supported formats for each processor type."""
-        formats = {}
-        for name, processor_cls in cls._processors.items():
-            processor = processor_cls()
-            formats[name] = processor.supported_formats
-        return formats
 
-class TableDetectionFactory(BaseProcessorFactory):
-    """Factory for creating table detection instances."""
+class ProcessingError(Exception):
+    """Base exception for processing errors."""
+    pass
+
+
+class UnsupportedFormatError(ProcessingError):
+    """Exception raised when file format is not supported."""
+    pass
+
+
+class ModelLoadError(ProcessingError):
+    """Exception raised when model fails to load."""
+    pass
+
+
+class BaseMLFactory(ABC):
+    """Base class for ML model factories."""
     
-    _processors = {
-        "image": ImageTableDetector,
-        "pdf": PDFTableDetector,
+    def __init__(self):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model: Optional[torch.nn.Module] = None
+        
+    @abstractmethod
+    def load_model(self) -> None:
+        """Load the PyTorch model."""
+        pass
+        
+    def ensure_model_loaded(self) -> None:
+        """Ensure model is loaded before processing."""
+        if self.model is None:
+            try:
+                self.load_model()
+            except Exception as e:
+                logger.error(f"Failed to load model: {str(e)}")
+                raise ModelLoadError(f"Failed to load model: {str(e)}")
+            
+    def to_device(self, data: torch.Tensor) -> torch.Tensor:
+        """Move data to the appropriate device."""
+        return data.to(self.device)
+
+
+class ProcessorFactory:
+    """Factory for creating document processor instances."""
+    
+    _processors: Dict[AnalysisType, Type[BaseDocumentProcessor]] = {
+        AnalysisType.TABLE_DETECTION: PDFTableDetector,
+        AnalysisType.TEXT_EXTRACTION: BaseTextExtractor,
+        AnalysisType.TEXT_SUMMARIZATION: BaseTextSummarizer,
+        AnalysisType.TEMPLATE_CONVERSION: BaseTemplateConverter
     }
     
     @classmethod
-    def get_detector(cls, file_path: str) -> Optional[BaseTableDetector]:
-        """Get appropriate detector for the file type."""
+    def get_processor(cls, analysis_type: AnalysisType) -> Optional[BaseDocumentProcessor]:
+        """Get processor instance for the specified analysis type."""
+        processor_cls = cls._processors.get(analysis_type)
+        if processor_cls:
+            try:
+                return processor_cls()
+            except Exception as e:
+                logger.error(f"Failed to create processor for {analysis_type}: {str(e)}")
+                return None
+        return None
+    
+    @classmethod
+    def get_supported_formats(cls, analysis_type: AnalysisType) -> List[str]:
+        """Get supported formats for the specified analysis type."""
+        processor = cls.get_processor(analysis_type)
+        if processor:
+            return processor.supported_formats
+        return []
+    
+    @classmethod
+    def validate_format(cls, analysis_type: AnalysisType, file_path: str) -> bool:
+        """Validate if file format is supported for the analysis type."""
+        processor = cls.get_processor(analysis_type)
+        if not processor:
+            return False
+        
         try:
-            mime_type, _ = mimetypes.guess_type(file_path)
-            if not mime_type:
-                logger.error(f"Could not determine mime type for file: {file_path}")
-                return None
-            
-            if mime_type.startswith('image/'):
-                return cls._processors["image"]()
-            elif mime_type == 'application/pdf':
-                return cls._processors["pdf"]()
-            else:
-                logger.error(f"Unsupported file type: {mime_type}")
-                return None
+            return processor.validate_file(file_path)
+        except Exception as e:
+            logger.error(f"File validation failed: {str(e)}")
+            return False
+
+
+class TableDetectionFactory(BaseMLFactory):
+    """Factory for table detection models."""
+    
+    def load_model(self) -> None:
+        """Load table detection PyTorch model."""
+        try:
+            self.model = torch.hub.load('ultralytics/yolov5', 'custom', 
+                                     path='path/to/table_detection_weights.pt')
+            self.model.to(self.device)
+            self.model.eval()
+        except Exception as e:
+            logger.error(f"Failed to load table detection model: {str(e)}")
+            raise ModelLoadError(f"Failed to load table detection model: {str(e)}")
+        
+    async def process(self, document_path: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """Process document for table detection."""
+        self.ensure_model_loaded()
+        
+        try:
+            with torch.no_grad():
+                # TODO: Implement actual table detection logic
+                results = {
+                    "tables": [],
+                    "page_numbers": [],
+                    "confidence_scores": []
+                }
+                return results
                 
         except Exception as e:
-            logger.error(f"Error creating detector for file {file_path}: {str(e)}")
-            return None
+            logger.error(f"Table detection failed: {str(e)}")
+            raise ProcessingError(f"Table detection failed: {str(e)}")
 
-# Placeholder factories for unimplemented services
-class TextExtractionFactory(BaseProcessorFactory):
-    """Factory for creating text extraction instances."""
-    
-    @classmethod
-    def get_extractor(cls, file_path: str) -> Optional[BaseTextExtractor]:
-        """Get appropriate extractor for the file type."""
-        logger.warning("Text extraction not implemented yet")
-        return None
 
-class TextSummarizationFactory(BaseProcessorFactory):
-    """Factory for creating text summarization instances."""
+class TextExtractionFactory(BaseMLFactory):
+    """Factory for text extraction models."""
     
-    @classmethod
-    def get_summarizer(cls, model_type: str = "transformer") -> Optional[BaseTextSummarizer]:
-        """Get text summarizer instance."""
-        logger.warning("Text summarization not implemented yet")
-        return None
+    def load_model(self) -> None:
+        """Load OCR and NLP PyTorch models."""
+        try:
+            self.ocr_model = torch.hub.load('your/ocr/model', 'custom', 
+                                         path='path/to/ocr_weights.pt')
+            self.nlp_model = torch.hub.load('your/nlp/model', 'custom',
+                                         path='path/to/nlp_weights.pt')
+            self.ocr_model.to(self.device)
+            self.nlp_model.to(self.device)
+            self.ocr_model.eval()
+            self.nlp_model.eval()
+        except Exception as e:
+            logger.error(f"Failed to load text extraction models: {str(e)}")
+            raise ModelLoadError(f"Failed to load text extraction models: {str(e)}")
+        
+    async def process(self, document_path: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """Process document for text extraction."""
+        self.ensure_model_loaded()
+        
+        try:
+            with torch.no_grad():
+                # TODO: Implement actual text extraction logic
+                results = {
+                    "text": "",
+                    "pages": [],
+                    "metadata": {}
+                }
+                return results
+                
+        except Exception as e:
+            logger.error(f"Text extraction failed: {str(e)}")
+            raise ProcessingError(f"Text extraction failed: {str(e)}")
 
-class TemplateConversionFactory(BaseProcessorFactory):
-    """Factory for creating template conversion instances."""
-    
-    @classmethod
-    def get_converter(cls, source_format: str) -> Optional[BaseTemplateConverter]:
-        """Get appropriate converter for the source format."""
-        logger.warning("Template conversion not implemented yet")
-        return None
 
-class DocumentClassificationFactory(BaseProcessorFactory):
-    """Factory for creating document classification instances."""
+class TextSummarizationFactory(BaseMLFactory):
+    """Factory for text summarization models."""
     
-    @classmethod
-    def get_classifier(cls) -> Optional[BaseDocumentClassifier]:
-        """Get document classifier instance."""
-        logger.warning("Document classification not implemented yet")
-        return None
+    def load_model(self) -> None:
+        """Load summarization PyTorch model."""
+        try:
+            self.model = torch.hub.load('facebook/bart-large-cnn', 'model')
+            self.model.to(self.device)
+            self.model.eval()
+        except Exception as e:
+            logger.error(f"Failed to load summarization model: {str(e)}")
+            raise ModelLoadError(f"Failed to load summarization model: {str(e)}")
+        
+    async def process(self, text: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """Process text for summarization."""
+        self.ensure_model_loaded()
+        
+        try:
+            with torch.no_grad():
+                # TODO: Implement actual summarization logic
+                results = {
+                    "summary": "",
+                    "original_length": 0,
+                    "summary_length": 0,
+                    "key_points": []
+                }
+                return results
+                
+        except Exception as e:
+            logger.error(f"Text summarization failed: {str(e)}")
+            raise ProcessingError(f"Text summarization failed: {str(e)}")
 
-class EntityExtractionFactory(BaseProcessorFactory):
-    """Factory for creating entity extraction instances."""
-    
-    @classmethod
-    def get_extractor(cls, model_type: str = "spacy") -> Optional[BaseEntityExtractor]:
-        """Get entity extractor instance."""
-        logger.warning("Entity extraction not implemented yet")
-        return None
 
-class DocumentComparisonFactory(BaseProcessorFactory):
-    """Factory for creating document comparison instances."""
+class TemplateConversionFactory(BaseMLFactory):
+    """Factory for template conversion models."""
     
-    @classmethod
-    def get_comparer(cls, comparison_type: str = "content") -> Optional[BaseDocumentComparer]:
-        """Get document comparer instance."""
-        logger.warning("Document comparison not implemented yet")
-        return None 
+    def load_model(self) -> None:
+        """Load template conversion PyTorch model."""
+        try:
+            self.model = torch.hub.load('your/template/model', 'custom',
+                                     path='path/to/template_weights.pt')
+            self.model.to(self.device)
+            self.model.eval()
+        except Exception as e:
+            logger.error(f"Failed to load template conversion model: {str(e)}")
+            raise ModelLoadError(f"Failed to load template conversion model: {str(e)}")
+        
+    async def process(self, document_path: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """Process document for template conversion."""
+        self.ensure_model_loaded()
+        
+        try:
+            with torch.no_grad():
+                # TODO: Implement actual template conversion logic
+                results = {
+                    "converted_file_url": "",
+                    "original_format": "",
+                    "target_format": parameters.get("target_format", "docx"),
+                    "conversion_metadata": {}
+                }
+                return results
+                
+        except Exception as e:
+            logger.error(f"Template conversion failed: {str(e)}")
+            raise ProcessingError(f"Template conversion failed: {str(e)}")
+
+
+
+# Factory mapping
+FACTORY_MAP = {
+    AnalysisType.TABLE_DETECTION: TableDetectionFactory,
+    AnalysisType.TEXT_EXTRACTION: TextExtractionFactory,
+    AnalysisType.TEXT_SUMMARIZATION: TextSummarizationFactory,
+    AnalysisType.TEMPLATE_CONVERSION: TemplateConversionFactory
+} 
