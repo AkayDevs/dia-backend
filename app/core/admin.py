@@ -12,6 +12,7 @@ from app.db.session import get_db
 import jwt as PyJWT
 from datetime import datetime
 import logging
+from app.schemas.analysis import AnalysisStatus
 
 logger = logging.getLogger(__name__)
 
@@ -268,27 +269,73 @@ class AnalysisResultAdmin(ModelView, model=AnalysisResult):
     name_plural = "Analysis Results"
     icon = "fa-solid fa-chart-simple"
     column_list = [
-        AnalysisResult.id, AnalysisResult.document_id,
-        AnalysisResult.type, AnalysisResult.created_at
+        AnalysisResult.id,
+        AnalysisResult.document_id,
+        AnalysisResult.type,
+        AnalysisResult.status,
+        AnalysisResult.progress,
+        AnalysisResult.created_at,
+        AnalysisResult.completed_at
     ]
-    column_searchable_list = [AnalysisResult.document_id]
-    column_sortable_list = [AnalysisResult.created_at, AnalysisResult.type]
+    column_searchable_list = [
+        AnalysisResult.document_id,
+        AnalysisResult.status,
+        AnalysisResult.type
+    ]
+    column_sortable_list = [
+        AnalysisResult.created_at,
+        AnalysisResult.completed_at,
+        AnalysisResult.type,
+        AnalysisResult.status,
+        AnalysisResult.progress
+    ]
     column_formatters = {
-        AnalysisResult.type: lambda m, a: f"<span class='badge badge-info'>{m.type.value}</span>"
+        AnalysisResult.type: lambda m, a: f"<span class='badge badge-info'>{m.type.value}</span>",
+        AnalysisResult.status: lambda m, a: f"<span class='badge badge-{_get_status_badge(m.status)}'>{m.status.value}</span>",
+        AnalysisResult.progress: lambda m, a: f"<div class='progress'><div class='progress-bar' role='progressbar' style='width: {m.progress}%' aria-valuenow='{m.progress}' aria-valuemin='0' aria-valuemax='100'>{m.progress}%</div></div>"
     }
     
     column_descriptions = {
         AnalysisResult.document_id: "Associated document ID",
         AnalysisResult.type: "Type of analysis performed",
-        AnalysisResult.created_at: "Analysis completion date",
-        AnalysisResult.result: "Analysis results (JSON)"
+        AnalysisResult.status: "Current status of the analysis",
+        AnalysisResult.progress: "Analysis progress (0-100%)",
+        AnalysisResult.status_message: "Current status message",
+        AnalysisResult.error: "Error message if analysis failed",
+        AnalysisResult.created_at: "When analysis was started",
+        AnalysisResult.completed_at: "When analysis was completed",
+        AnalysisResult.result: "Analysis results (JSON)",
+        AnalysisResult.parameters: "Analysis parameters (JSON)"
     }
+    
+    column_details_list = [
+        AnalysisResult.id,
+        AnalysisResult.document_id,
+        AnalysisResult.type,
+        AnalysisResult.status,
+        AnalysisResult.progress,
+        AnalysisResult.status_message,
+        AnalysisResult.error,
+        AnalysisResult.parameters,
+        AnalysisResult.result,
+        AnalysisResult.created_at,
+        AnalysisResult.completed_at
+    ]
     
     can_create = False
     can_delete = False
     can_edit = False
     page_size = settings.ADMIN_PAGE_SIZE
     page_size_options = settings.ADMIN_PAGE_SIZE_OPTIONS
+
+def _get_status_badge(status: AnalysisStatus) -> str:
+    """Get appropriate Bootstrap badge class for status."""
+    return {
+        AnalysisStatus.PENDING: "warning",
+        AnalysisStatus.PROCESSING: "info",
+        AnalysisStatus.COMPLETED: "success",
+        AnalysisStatus.FAILED: "danger"
+    }.get(status, "secondary")
 
 
 class BlacklistedTokenAdmin(ModelView, model=BlacklistedToken):
