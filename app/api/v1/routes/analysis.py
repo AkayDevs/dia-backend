@@ -1,5 +1,5 @@
-from typing import Any, List
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status
+from typing import Any, List, Optional
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status, Query
 from sqlalchemy.orm import Session
 import logging
 
@@ -12,6 +12,9 @@ from app.schemas.analysis import (
     AnalysisResult,
     AnalysisType,
     AnalysisStatus,
+    AnalysisParameters,
+    BatchAnalysisRequest,
+    BatchAnalysisResponse
 )
 from app.services.analysis import AnalysisService
 
@@ -19,75 +22,204 @@ router = APIRouter()
 logger = logging.getLogger("app.api.analysis")
 
 
-@router.post("/{document_id}/analyze", response_model=AnalysisResult)
+@router.post("/batch", response_model=BatchAnalysisResponse)
+async def create_batch_analysis(
+    *,
+    batch_request: BatchAnalysisRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(get_current_active_verified_user),
+) -> Any:
+    """
+    Create multiple analysis tasks for multiple documents.
+    
+    Args:
+        batch_request: Batch analysis request containing document IDs and analysis parameters
+        background_tasks: Background tasks runner
+        db: Database session
+        current_user: Currently authenticated user
+        
+    Returns:
+        Batch analysis response with created analysis tasks
+        
+    Raises:
+        HTTPException: If any document is not found or validation fails
+    """
+    logger.info(f"Creating batch analysis for {len(batch_request.documents)} documents")
+    
+    analysis_service = AnalysisService(db)
+    results = []
+    errors = []
+
+    for doc_request in batch_request.documents:
+        try:
+            # Verify document ownership
+            document = db.query(Document).filter(
+                Document.id == doc_request.document_id,
+                Document.user_id == current_user.id
+            ).first()
+            
+            if not document:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Document not found: {doc_request.document_id}"
+                )
+
+            # Create analysis task
+            analysis = analysis_service.create_analysis(
+                document_id=doc_request.document_id,
+                analysis_type=doc_request.analysis_type,
+                parameters=doc_request.parameters
+            )
+            
+            # Schedule processing
+            background_tasks.add_task(
+                analysis_service.process_analysis,
+                analysis.id
+            )
+            
+            results.append(analysis)
+            
+        except Exception as e:
+            errors.append({
+                "document_id": doc_request.document_id,
+                "error": str(e)
+            })
+
+    if errors and not results:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": "All analysis requests failed", "errors": errors}
+        )
+
+    return {
+        "results": results,
+        "errors": errors if errors else None,
+        "total_submitted": len(results),
+        "total_failed": len(errors)
+    }
+
+
+@router.post("/{document_id}", response_model=AnalysisResult)
 async def create_analysis(
     *,
     document_id: str,
-    analysis_in: AnalysisRequest,
+    analysis_request: AnalysisRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(get_current_active_verified_user),
 ) -> Any:
     """
     Create a new analysis task for a document.
-    """
-    logger.debug(f"Creating analysis - Document: {document_id}, Type: {analysis_in.analysis_type}")
     
-    # Check if document exists and belongs to user
+    Args:
+        document_id: Document ID
+        analysis_request: Analysis request parameters
+        background_tasks: Background tasks runner
+        db: Database session
+        current_user: Currently authenticated user
+        
+    Returns:
+        Created analysis task
+        
+    Raises:
+        HTTPException: If document is not found or validation fails
+    """
+    logger.info(f"Creating analysis - Document: {document_id}, Type: {analysis_request.analysis_type}")
+    
+    # Verify document ownership
     document = db.query(Document).filter(
         Document.id == document_id,
         Document.user_id == current_user.id
     ).first()
+    
     if not document:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found"
         )
     
-    # Create analysis service
-    analysis_service = AnalysisService(db)
-    
-    # Create analysis task
-    analysis = analysis_service.create_analysis(
-        document_id=document_id,
-        analysis_type=analysis_in.analysis_type,
-        parameters=analysis_in.parameters,
-    )
-    
-    # Add processing task to background tasks
-    background_tasks.add_task(analysis_service.process_analysis, analysis.id)
-    
-    return analysis
+    try:
+        # Create analysis service
+        analysis_service = AnalysisService(db)
+        
+        # Create analysis task
+        analysis = analysis_service.create_analysis(
+            document_id=document_id,
+            analysis_type=analysis_request.analysis_type,
+            parameters=analysis_request.parameters
+        )
+        
+        # Schedule processing
+        background_tasks.add_task(
+            analysis_service.process_analysis,
+            analysis.id
+        )
+        
+        return analysis
+        
+    except Exception as e:
+        logger.error(f"Error creating analysis: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
 
-@router.get("/{document_id}/analyses", response_model=List[AnalysisResult])
-async def list_analyses(
+@router.get("/document/{document_id}", response_model=List[AnalysisResult])
+async def list_document_analyses(
     document_id: str,
+    analysis_type: Optional[AnalysisType] = None,
+    status: Optional[AnalysisStatus] = None,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(get_current_active_verified_user),
 ) -> Any:
     """
-    List all analyses for a document.
-    """
-    logger.debug(f"Listing analyses for document: {document_id}")
+    List all analyses for a document with optional filtering.
     
-    # Check if document exists and belongs to user
+    Args:
+        document_id: Document ID
+        analysis_type: Filter by analysis type
+        status: Filter by analysis status
+        skip: Number of records to skip
+        limit: Maximum number of records to return
+        db: Database session
+        current_user: Currently authenticated user
+        
+    Returns:
+        List of analysis results
+        
+    Raises:
+        HTTPException: If document is not found
+    """
+    logger.info(f"Listing analyses for document: {document_id}")
+    
+    # Verify document ownership
     document = db.query(Document).filter(
         Document.id == document_id,
         Document.user_id == current_user.id
     ).first()
+    
     if not document:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found"
         )
     
-    # Get analyses
+    # Get analyses with filters
     analysis_service = AnalysisService(db)
-    return analysis_service.get_document_analyses(document_id)
+    return analysis_service.get_document_analyses(
+        document_id=document_id,
+        analysis_type=analysis_type,
+        status=status,
+        skip=skip,
+        limit=limit
+    )
 
 
-@router.get("/analysis/{analysis_id}", response_model=AnalysisResult)
+@router.get("/{analysis_id}", response_model=AnalysisResult)
 async def get_analysis(
     analysis_id: str,
     db: Session = Depends(deps.get_db),
@@ -95,10 +227,20 @@ async def get_analysis(
 ) -> Any:
     """
     Get a specific analysis result.
-    """
-    logger.debug(f"Fetching analysis: {analysis_id}")
     
-    # Get analysis
+    Args:
+        analysis_id: Analysis ID
+        db: Database session
+        current_user: Currently authenticated user
+        
+    Returns:
+        Analysis result
+        
+    Raises:
+        HTTPException: If analysis is not found or user doesn't have access
+    """
+    logger.info(f"Fetching analysis: {analysis_id}")
+    
     analysis_service = AnalysisService(db)
     analysis = analysis_service.get_analysis(analysis_id)
     
@@ -108,11 +250,12 @@ async def get_analysis(
             detail="Analysis not found"
         )
     
-    # Check if document belongs to user
+    # Verify document ownership
     document = db.query(Document).filter(
         Document.id == analysis.document_id,
         Document.user_id == current_user.id
     ).first()
+    
     if not document:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -126,8 +269,11 @@ async def get_analysis(
 async def list_analysis_types() -> Any:
     """
     List all available analysis types with their parameters.
+    
+    Returns:
+        List of analysis types with their configurations
     """
-    logger.debug("Listing available analysis types")
+    logger.info("Listing available analysis types")
     
     return [
         {

@@ -141,9 +141,47 @@ class DocumentComparisonParameters(AnalysisParameters):
     )
 
 
+class AnalysisResultBase(BaseModel):
+    """Base schema for analysis results."""
+    type: AnalysisType = Field(..., description="Type of analysis performed")
+    result: Optional[Dict[str, Any]] = Field(None, description="Analysis results")
+
+
+class AnalysisResult(AnalysisResultBase):
+    """Schema for complete analysis result."""
+    id: str = Field(..., description="Result unique identifier")
+    document_id: str = Field(..., description="ID of the analyzed document")
+    status: AnalysisStatus = Field(..., description="Analysis status")
+    parameters: Dict[str, Any] = Field(..., description="Parameters used for analysis")
+    error: Optional[str] = Field(None, description="Error message if analysis failed")
+    created_at: datetime = Field(..., description="When analysis was started")
+    completed_at: Optional[datetime] = Field(None, description="When analysis completed")
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "document_id": "123e4567-e89b-12d3-a456-426614174000",
+                "type": "text_extraction",
+                "status": "completed",
+                "parameters": {
+                    "confidence_threshold": 0.7,
+                    "extract_layout": True
+                },
+                "result": {
+                    "text": "Extracted content",
+                    "pages": 5
+                },
+                "created_at": "2024-01-06T12:00:00Z",
+                "completed_at": "2024-01-06T12:01:00Z"
+            }
+        }
+    )
+
+
 class AnalysisRequest(BaseModel):
     """Request to perform analysis on a document."""
-    document_id: str = Field(..., description="ID of the document to analyze")
     analysis_type: AnalysisType = Field(..., description="Type of analysis to perform")
     parameters: Dict[str, Any] = Field(
         default_factory=dict,
@@ -175,6 +213,34 @@ class AnalysisRequest(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
+                "analysis_type": "text_extraction",
+                "parameters": {
+                    "confidence_threshold": 0.7,
+                    "extract_layout": True,
+                    "detect_lists": True
+                }
+            }
+        }
+    )
+
+
+class BatchAnalysisDocument(BaseModel):
+    """Single document analysis request in a batch."""
+    document_id: str = Field(..., description="ID of the document to analyze")
+    analysis_type: AnalysisType = Field(..., description="Type of analysis to perform")
+    parameters: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Analysis-specific parameters"
+    )
+
+    @validator("parameters")
+    def validate_parameters(cls, v, values):
+        """Validate parameters based on analysis type."""
+        return AnalysisRequest.validate_parameters(cls, v, values)
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
                 "document_id": "550e8400-e29b-41d4-a716-446655440000",
                 "analysis_type": "text_extraction",
                 "parameters": {
@@ -187,44 +253,78 @@ class AnalysisRequest(BaseModel):
     )
 
 
-class AnalysisResultBase(BaseModel):
-    """Base schema for analysis results."""
-    type: AnalysisType = Field(..., description="Type of analysis performed")
-    result: Optional[Dict[str, Any]] = Field(None, description="Analysis results")
-
-
-class AnalysisResultCreate(AnalysisResultBase):
-    """Schema for creating a new analysis result."""
-    document_id: str = Field(..., description="ID of the analyzed document")
+class BatchAnalysisRequest(BaseModel):
+    """Request to perform analysis on multiple documents."""
+    documents: List[BatchAnalysisDocument] = Field(
+        ...,
+        min_items=1,
+        max_items=10,
+        description="List of documents to analyze"
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "type": "text_extraction",
-                "document_id": "550e8400-e29b-41d4-a716-446655440000",
-                "result": {
-                    "text": "Extracted content",
-                    "pages": 5
-                }
+                "documents": [
+                    {
+                        "document_id": "550e8400-e29b-41d4-a716-446655440000",
+                        "analysis_type": "text_extraction",
+                        "parameters": {
+                            "confidence_threshold": 0.7,
+                            "extract_layout": True
+                        }
+                    },
+                    {
+                        "document_id": "660e8400-e29b-41d4-a716-446655440000",
+                        "analysis_type": "table_detection",
+                        "parameters": {
+                            "confidence_threshold": 0.8,
+                            "min_row_count": 3
+                        }
+                    }
+                ]
             }
         }
     )
 
 
-class AnalysisResultUpdate(BaseModel):
-    """Schema for updating an existing analysis result."""
-    result: Optional[Dict[str, Any]] = Field(None, description="Updated analysis results")
-    status: Optional[AnalysisStatus] = Field(None, description="Updated analysis status")
-    error: Optional[str] = Field(None, description="Error message if analysis failed")
+class BatchAnalysisError(BaseModel):
+    """Error details for a failed analysis in a batch."""
+    document_id: str = Field(..., description="ID of the document that failed")
+    error: str = Field(..., description="Error message")
+
+
+class BatchAnalysisResponse(BaseModel):
+    """Response for a batch analysis request."""
+    results: List[AnalysisResult] = Field(..., description="Successfully created analysis tasks")
+    errors: Optional[List[BatchAnalysisError]] = Field(None, description="Failed analysis requests")
+    total_submitted: int = Field(..., description="Total number of successful submissions")
+    total_failed: int = Field(..., description="Total number of failed submissions")
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "result": {
-                    "text": "Updated content",
-                    "pages": 6
-                },
-                "status": "completed"
+                "results": [
+                    {
+                        "id": "550e8400-e29b-41d4-a716-446655440000",
+                        "document_id": "123e4567-e89b-12d3-a456-426614174000",
+                        "type": "text_extraction",
+                        "status": "pending",
+                        "parameters": {
+                            "confidence_threshold": 0.7,
+                            "extract_layout": True
+                        },
+                        "created_at": "2024-01-06T12:00:00Z"
+                    }
+                ],
+                "errors": [
+                    {
+                        "document_id": "660e8400-e29b-41d4-a716-446655440000",
+                        "error": "Document not found"
+                    }
+                ],
+                "total_submitted": 1,
+                "total_failed": 1
             }
         }
     )
@@ -269,34 +369,38 @@ class TemplateConversionResult(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-class AnalysisResult(AnalysisResultBase):
-    """Schema for complete analysis result."""
-    id: str = Field(..., description="Result unique identifier")
+class AnalysisResultCreate(AnalysisResultBase):
+    """Schema for creating a new analysis result."""
     document_id: str = Field(..., description="ID of the analyzed document")
-    status: AnalysisStatus = Field(..., description="Analysis status")
-    parameters: Dict[str, Any] = Field(..., description="Parameters used for analysis")
-    error: Optional[str] = Field(None, description="Error message if analysis failed")
-    created_at: datetime = Field(..., description="When analysis was started")
-    completed_at: Optional[datetime] = Field(None, description="When analysis completed")
 
     model_config = ConfigDict(
-        from_attributes=True,
         json_schema_extra={
             "example": {
-                "id": "550e8400-e29b-41d4-a716-446655440000",
-                "document_id": "123e4567-e89b-12d3-a456-426614174000",
                 "type": "text_extraction",
-                "status": "completed",
-                "parameters": {
-                    "confidence_threshold": 0.7,
-                    "extract_layout": True
-                },
+                "document_id": "550e8400-e29b-41d4-a716-446655440000",
                 "result": {
                     "text": "Extracted content",
                     "pages": 5
+                }
+            }
+        }
+    )
+
+
+class AnalysisResultUpdate(BaseModel):
+    """Schema for updating an existing analysis result."""
+    result: Optional[Dict[str, Any]] = Field(None, description="Updated analysis results")
+    status: Optional[AnalysisStatus] = Field(None, description="Updated analysis status")
+    error: Optional[str] = Field(None, description="Error message if analysis failed")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "result": {
+                    "text": "Updated content",
+                    "pages": 6
                 },
-                "created_at": "2024-01-06T12:00:00Z",
-                "completed_at": "2024-01-06T12:01:00Z"
+                "status": "completed"
             }
         }
     ) 
