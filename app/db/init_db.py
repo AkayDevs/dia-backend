@@ -26,10 +26,6 @@ def init_db(db: Session) -> None:
         password = settings.FIRST_SUPERUSER_PASSWORD
         password_hash = get_password_hash(password)
         
-        # Verify the hash works before saving
-        if not verify_password(password, password_hash):
-            raise Exception("Password verification failed for newly created hash!")
-        
         user = User(
             id=str(uuid.uuid4()),
             email=settings.FIRST_SUPERUSER,
@@ -44,11 +40,6 @@ def init_db(db: Session) -> None:
         try:
             db.commit()
             db.refresh(user)
-            
-            # Verify the stored password works
-            stored_user = db.query(User).filter(User.email == settings.FIRST_SUPERUSER).first()
-            if not verify_password(password, stored_user.hashed_password):
-                raise Exception("Password verification failed for stored user!")
             
             logger.info("Admin user created successfully")
             logger.debug(f"""Admin user details:
