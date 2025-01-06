@@ -21,6 +21,7 @@ class User(Base):
     role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.USER, nullable=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    last_login: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Additional security fields
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

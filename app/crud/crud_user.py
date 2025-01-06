@@ -96,11 +96,18 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
         return user
 
     def set_password(self, db: Session, *, user: User, password: str) -> User:
-        """Set new password for user."""
-        user.hashed_password = get_password_hash(password)
-        user.password_reset_token = None
-        user.password_reset_expires = None
+        """Set a new password for user."""
+        hashed_password = get_password_hash(password)
+        user.hashed_password = hashed_password
         user.updated_at = datetime.utcnow()
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        return user
+
+    def update_last_login(self, db: Session, *, user: User) -> User:
+        """Update user's last login timestamp."""
+        user.last_login = datetime.utcnow()
         db.add(user)
         db.commit()
         db.refresh(user)

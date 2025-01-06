@@ -45,23 +45,25 @@ class RateLimiter:
         Returns:
             bool: True if request is allowed, False otherwise
         """
-        now = datetime.now()
-        minute_ago = now.timestamp() - 60
+        now = datetime.now().timestamp()
+        minute_ago = now - 60
+
+        # Initialize if key doesn't exist
+        if key not in self.requests:
+            self.requests[key] = []
 
         # Clean old requests
-        self.requests = {k: v for k, v in self.requests.items() if v > minute_ago}
+        self.requests[key] = [ts for ts in self.requests[key] if ts > minute_ago]
 
         # Get requests in current window
-        requests_in_window = len([ts for ts in self.requests.get(key, []) if ts > minute_ago])
+        requests_in_window = len(self.requests[key])
         
         # Check both rate limit and burst limit
         if requests_in_window >= self.requests_per_minute or requests_in_window >= self.burst_limit:
             return False
 
-        # Add new request
-        if key not in self.requests:
-            self.requests[key] = []
-        self.requests[key].append(now.timestamp())
+        # Add current request
+        self.requests[key].append(now)
         return True
 
 

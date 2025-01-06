@@ -130,7 +130,7 @@ async def login(
         )
         
         # Update last login timestamp
-        crud_user.update_last_login(db, user_id=user.id)
+        crud_user.update_last_login(db, user=user)
         
         logger.info(f"User logged in successfully: {user.id}")
         
