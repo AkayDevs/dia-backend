@@ -1,4 +1,4 @@
-from typing import Dict, Type, Optional, List, Any
+from typing import Dict, Type, Optional, List, Any, Callable
 import logging
 import mimetypes
 from pathlib import Path
@@ -58,6 +58,26 @@ class BaseMLFactory(ABC):
     def to_device(self, data: torch.Tensor) -> torch.Tensor:
         """Move data to the appropriate device."""
         return data.to(self.device)
+        
+    @abstractmethod
+    def get_supported_parameters(self, document_type: str) -> Dict[str, Any]:
+        """Get supported parameters for document type."""
+        pass
+        
+    @abstractmethod
+    def validate_parameters(self, document_type: str, parameters: Dict[str, Any]) -> bool:
+        """Validate parameters for document type."""
+        pass
+        
+    @abstractmethod
+    async def process(
+        self,
+        file_path: str,
+        parameters: Dict[str, Any],
+        progress_callback: Optional[Callable[[float, str], None]] = None
+    ) -> Dict[str, Any]:
+        """Process the document with progress tracking."""
+        pass
 
 
 class ProcessorFactory:
@@ -107,6 +127,39 @@ class ProcessorFactory:
 class TableDetectionFactory(BaseMLFactory):
     """Factory for table detection models."""
     
+    def __init__(self):
+        super().__init__()
+        self.supported_formats = {
+            "pdf": {
+                "parameters": {
+                    "confidence_threshold": {
+                        "type": "float",
+                        "default": 0.5,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "description": "Minimum confidence score for table detection"
+                    },
+                    "min_row_count": {
+                        "type": "int",
+                        "default": 2,
+                        "min": 1,
+                        "description": "Minimum number of rows to consider as table"
+                    }
+                }
+            },
+            "image": {
+                "parameters": {
+                    "confidence_threshold": {
+                        "type": "float",
+                        "default": 0.5,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "description": "Minimum confidence score for table detection"
+                    }
+                }
+            }
+        }
+    
     def load_model(self) -> None:
         """Load table detection PyTorch model."""
         try:
@@ -117,20 +170,80 @@ class TableDetectionFactory(BaseMLFactory):
         except Exception as e:
             logger.error(f"Failed to load table detection model: {str(e)}")
             raise ModelLoadError(f"Failed to load table detection model: {str(e)}")
+            
+    def get_supported_parameters(self, document_type: str) -> Dict[str, Any]:
+        """Get supported parameters for document type."""
+        if document_type not in self.supported_formats:
+            raise UnsupportedFormatError(f"Unsupported document type: {document_type}")
+        return self.supported_formats[document_type]["parameters"]
         
-    async def process(self, document_path: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """Process document for table detection."""
+    def validate_parameters(self, document_type: str, parameters: Dict[str, Any]) -> bool:
+        """Validate parameters for document type."""
+        if document_type not in self.supported_formats:
+            return False
+            
+        supported_params = self.supported_formats[document_type]["parameters"]
+        
+        try:
+            for param_name, param_spec in supported_params.items():
+                if param_name in parameters:
+                    value = parameters[param_name]
+                    
+                    # Type checking
+                    if param_spec["type"] == "float":
+                        value = float(value)
+                    elif param_spec["type"] == "int":
+                        value = int(value)
+                        
+                    # Range checking
+                    if "min" in param_spec and value < param_spec["min"]:
+                        return False
+                    if "max" in param_spec and value > param_spec["max"]:
+                        return False
+                        
+            return True
+        except (ValueError, TypeError):
+            return False
+        
+    async def process(
+        self,
+        file_path: str,
+        parameters: Dict[str, Any],
+        progress_callback: Optional[Callable[[float, str], None]] = None
+    ) -> Dict[str, Any]:
+        """Process document for table detection with progress tracking."""
         self.ensure_model_loaded()
         
         try:
-            with torch.no_grad():
-                # TODO: Implement actual table detection logic
-                results = {
-                    "tables": [],
-                    "page_numbers": [],
-                    "confidence_scores": []
-                }
-                return results
+            if progress_callback:
+                await progress_callback(10, "Loading document")
+                
+            # Get document type
+            document_type = "pdf" if file_path.lower().endswith(".pdf") else "image"
+            
+            # Validate parameters
+            if not self.validate_parameters(document_type, parameters):
+                raise ValueError("Invalid parameters for table detection")
+                
+            if progress_callback:
+                await progress_callback(20, "Detecting tables")
+                
+            # Process based on document type
+            if document_type == "pdf":
+                detector = PDFTableDetector()
+            else:
+                detector = ImageTableDetector()
+                
+            tables = detector.detect_tables(file_path, **parameters)
+            
+            if progress_callback:
+                await progress_callback(90, "Finalizing results")
+                
+            return {
+                "tables": tables,
+                "page_numbers": [table.get("page_number", 1) for table in tables],
+                "confidence_scores": [table["confidence"] for table in tables]
+            }
                 
         except Exception as e:
             logger.error(f"Table detection failed: {str(e)}")
@@ -140,8 +253,41 @@ class TableDetectionFactory(BaseMLFactory):
 class TextExtractionFactory(BaseMLFactory):
     """Factory for text extraction models."""
     
+    def __init__(self):
+        super().__init__()
+        self.supported_formats = {
+            "pdf": {
+                "parameters": {
+                    "extract_layout": {
+                        "type": "bool",
+                        "default": True,
+                        "description": "Whether to preserve document layout"
+                    },
+                    "detect_lists": {
+                        "type": "bool",
+                        "default": True,
+                        "description": "Whether to detect and preserve lists"
+                    }
+                }
+            },
+            "image": {
+                "parameters": {
+                    "language": {
+                        "type": "str",
+                        "default": "eng",
+                        "description": "Language of the text in image"
+                    },
+                    "enhance_image": {
+                        "type": "bool",
+                        "default": True,
+                        "description": "Whether to enhance image before OCR"
+                    }
+                }
+            }
+        }
+    
     def load_model(self) -> None:
-        """Load OCR and NLP PyTorch models."""
+        """Load OCR and NLP models."""
         try:
             self.ocr_model = torch.hub.load('your/ocr/model', 'custom', 
                                          path='path/to/ocr_weights.pt')
@@ -154,20 +300,69 @@ class TextExtractionFactory(BaseMLFactory):
         except Exception as e:
             logger.error(f"Failed to load text extraction models: {str(e)}")
             raise ModelLoadError(f"Failed to load text extraction models: {str(e)}")
+            
+    def get_supported_parameters(self, document_type: str) -> Dict[str, Any]:
+        """Get supported parameters for document type."""
+        if document_type not in self.supported_formats:
+            raise UnsupportedFormatError(f"Unsupported document type: {document_type}")
+        return self.supported_formats[document_type]["parameters"]
         
-    async def process(self, document_path: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """Process document for text extraction."""
+    def validate_parameters(self, document_type: str, parameters: Dict[str, Any]) -> bool:
+        """Validate parameters for document type."""
+        if document_type not in self.supported_formats:
+            return False
+            
+        supported_params = self.supported_formats[document_type]["parameters"]
+        
+        try:
+            for param_name, param_spec in supported_params.items():
+                if param_name in parameters:
+                    value = parameters[param_name]
+                    
+                    # Type checking
+                    if param_spec["type"] == "bool":
+                        value = bool(value)
+                    elif param_spec["type"] == "str":
+                        value = str(value)
+                        
+            return True
+        except (ValueError, TypeError):
+            return False
+        
+    async def process(
+        self,
+        file_path: str,
+        parameters: Dict[str, Any],
+        progress_callback: Optional[Callable[[float, str], None]] = None
+    ) -> Dict[str, Any]:
+        """Process document for text extraction with progress tracking."""
         self.ensure_model_loaded()
         
         try:
-            with torch.no_grad():
-                # TODO: Implement actual text extraction logic
-                results = {
-                    "text": "",
-                    "pages": [],
-                    "metadata": {}
-                }
-                return results
+            if progress_callback:
+                await progress_callback(10, "Loading document")
+                
+            # Get document type
+            document_type = "pdf" if file_path.lower().endswith(".pdf") else "image"
+            
+            # Validate parameters
+            if not self.validate_parameters(document_type, parameters):
+                raise ValueError("Invalid parameters for text extraction")
+                
+            if progress_callback:
+                await progress_callback(20, "Extracting text")
+                
+            # TODO: Implement actual text extraction logic
+            result = {
+                "text": "",
+                "pages": [],
+                "metadata": {}
+            }
+            
+            if progress_callback:
+                await progress_callback(90, "Finalizing results")
+                
+            return result
                 
         except Exception as e:
             logger.error(f"Text extraction failed: {str(e)}")
