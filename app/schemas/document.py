@@ -1,51 +1,90 @@
+from typing import Optional, Any, List
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
 from datetime import datetime
-from enum import Enum
+from app.db.models.document import DocumentType, AnalysisStatus, AnalysisType
 
-class DocumentStatus(str, Enum):
-    PENDING = "pending"
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-class DocumentType(str, Enum):
-    PDF = "pdf"
-    DOCX = "docx"
-    XLSX = "xlsx"
-    IMAGE = "image"
-
-class DocumentMetadata(BaseModel):
-    page_count: Optional[int] = None
-    word_count: Optional[int] = None
-    has_tables: Optional[bool] = None
-    has_images: Optional[bool] = None
 
 class DocumentBase(BaseModel):
     name: str
     type: DocumentType
     size: int
+    url: str
+
 
 class DocumentCreate(DocumentBase):
     pass
 
+
 class DocumentUpdate(BaseModel):
-    status: Optional[DocumentStatus] = None
-    metadata: Optional[Dict[str, Any]] = None
-    page_count: Optional[int] = None
-    word_count: Optional[int] = None
-    has_tables: Optional[bool] = None
-    has_images: Optional[bool] = None
-    processed_at: Optional[datetime] = None
+    name: Optional[str] = None
+    status: Optional[AnalysisStatus] = None
+
 
 class Document(DocumentBase):
-    id: int
-    status: DocumentStatus
-    url: str
-    metadata: Optional[DocumentMetadata] = None
+    id: str
+    status: AnalysisStatus
     uploaded_at: datetime
-    processed_at: Optional[datetime] = None
-    user_id: int
+    user_id: str
 
     class Config:
-        from_attributes = True 
+        from_attributes = True
+
+
+class AnalysisResultBase(BaseModel):
+    type: AnalysisType
+    result: Optional[Any] = None
+
+
+class AnalysisResultCreate(AnalysisResultBase):
+    document_id: str
+
+
+class AnalysisResultUpdate(BaseModel):
+    result: Any
+
+
+class AnalysisResult(AnalysisResultBase):
+    id: str
+    document_id: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class DocumentWithAnalysis(Document):
+    analysis_results: List[AnalysisResult]
+
+    class Config:
+        from_attributes = True
+
+
+# Analysis Parameters Schemas
+class TableDetectionParams(BaseModel):
+    min_confidence: float = Field(0.5, ge=0.0, le=1.0)
+    table_type: str = Field("bordered", pattern="^(bordered|borderless|both)$")
+
+
+class TextExtractionParams(BaseModel):
+    include_layout: bool = False
+    extract_tables: bool = True
+
+
+class TextSummarizationParams(BaseModel):
+    max_length: int = Field(150, ge=50, le=500)
+    min_length: int = Field(50, ge=30, le=100)
+
+
+class TemplateConversionParams(BaseModel):
+    output_format: str = Field("docx", pattern="^(docx|pdf)$")
+    preserve_layout: bool = True
+
+
+class AnalysisParameters(BaseModel):
+    type: AnalysisType
+    params: Optional[
+        TableDetectionParams |
+        TextExtractionParams |
+        TextSummarizationParams |
+        TemplateConversionParams
+    ] = None 

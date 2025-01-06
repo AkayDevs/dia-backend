@@ -1,51 +1,78 @@
-# DIA Backend
+# Document Intelligence Analysis Backend
 
-Document Intelligence Analysis Backend Service built with FastAPI.
+A FastAPI-based backend service for document analysis, including features like table detection, text extraction, summarization, and template conversion.
 
 ## Features
 
-- User Authentication and Authorization
-- Document Upload and Management
-- Document Analysis (Table Detection, Text Extraction, etc.)
-- RESTful API
-- SQLite Database (easily upgradeable to PostgreSQL)
-- JWT-based Authentication
-- CORS Support
-- Environment Variable Configuration
+- Document Upload & Management
+- Text Extraction
+- Table Detection
+- Text Summarization
+- Template Conversion
+- User Authentication & Authorization
+- Secure File Handling
+- API Documentation (via Swagger UI)
+
+## Tech Stack
+
+- Python 3.9+
+- FastAPI
+- SQLAlchemy (ORM)
+- PyTorch (ML Models)
+- Poetry (Dependency Management)
+- SQLite (Database)
 
 ## Prerequisites
 
-- Python 3.9+
-- Poetry (Python package manager)
-- pyenv (Python version manager)
+- Python 3.9 or higher
+- Poetry for dependency management
+- pyenv (recommended for Python version management)
 
 ## Setup
 
-1. Set up Python environment:
+1. Clone the repository:
+```bash
+git clone <repository-url>
+cd dia-backend
+```
+
+2. Install Python 3.9+ using pyenv:
 ```bash
 pyenv install 3.9.0
 pyenv local 3.9.0
 ```
 
-2. Install dependencies:
+3. Install Poetry:
+```bash
+curl -sSL https://install.python-poetry.org | python3 -
+```
+
+4. Install dependencies:
 ```bash
 poetry install
 ```
 
-3. Create and configure `.env` file:
+5. Create environment file:
 ```bash
 cp .env.example .env
 # Edit .env with your configurations
 ```
 
-4. Initialize the database:
+6. Create necessary directories:
 ```bash
-poetry run alembic upgrade head
+mkdir -p uploads app/ml/models
 ```
 
-5. Run the development server:
+## Development
+
+1. Activate the virtual environment:
 ```bash
-poetry run uvicorn app.main:app --reload
+poetry shell
+```
+
+2. Run the development server:
+```bash
+python app/main.py
 ```
 
 The API will be available at `http://localhost:8000`
@@ -60,48 +87,48 @@ dia-backend/
 │   │   └── v1/
 │   │       └── routes/
 │   ├── core/
+│   │   ├── config.py
+│   │   └── security.py
 │   ├── db/
+│   │   ├── session.py
+│   │   └── models/
 │   ├── ml/
+│   │   └── models/
 │   ├── schemas/
-│   └── services/
+│   ├── services/
+│   └── main.py
 ├── tests/
 │   ├── unit/
 │   └── integration/
+├── uploads/
 ├── .env
-├── poetry.lock
-└── pyproject.toml
-```
-
-## Development
-
-1. Run tests:
-```bash
-poetry run pytest
-```
-
-2. Format code:
-```bash
-poetry run black .
-poetry run isort .
-```
-
-3. Run linting:
-```bash
-poetry run flake8
-poetry run mypy .
+├── .env.example
+├── pyproject.toml
+└── README.md
 ```
 
 ## API Documentation
 
 Once the server is running, you can access:
-- Swagger UI documentation at `/docs`
-- ReDoc documentation at `/redoc`
+- Swagger UI: `http://localhost:8000/docs`
+- ReDoc: `http://localhost:8000/redoc`
+
+## Testing
+
+Run tests using pytest:
+```bash
+poetry run pytest
+```
 
 ## Security
 
 - JWT-based authentication
-- Password hashing with bcrypt
-- CORS configuration
+- File validation and sanitization
+- CORS protection
 - Rate limiting
 - Input validation
-- Secure file uploads 
+- Secure password hashing
+
+## License
+
+[Your License Here]

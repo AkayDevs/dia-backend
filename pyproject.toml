@@ -2,36 +2,38 @@
 name = "dia-backend"
 version = "0.1.0"
 description = "Document Intelligence Analysis Backend"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["DIA Team"]
+readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.9"
-fastapi = "^0.104.1"
-uvicorn = "^0.24.0"
-sqlalchemy = "^2.0.23"
-alembic = "^1.12.1"
+python = ">=3.9,<3.12"
+fastapi = "^0.115.6"
+uvicorn = {extras = ["standard"], version = "^0.34.0"}
+sqlalchemy = "^2.0.36"
 python-jose = {extras = ["cryptography"], version = "^3.3.0"}
 passlib = {extras = ["bcrypt"], version = "^1.7.4"}
-python-multipart = "^0.0.6"
-email-validator = "^2.1.0.post1"
-aiosqlite = "^0.19.0"
-greenlet = "^3.0.1"
+python-multipart = "^0.0.20"
+pydantic-settings = "^2.7.1"
+alembic = "^1.14.0"
+python-dotenv = "^1.0.1"
+pillow = "^11.1.0"
+python-docx = "^1.1.2"
+pypdf = "^5.1.0"
+pydantic = {extras = ["email"], version = "^2.10.4"}
+aiofiles = "^24.1.0"
 python-magic = "^0.4.27"
-aiofiles = "^23.2.1"
-PyMuPDF = "^1.23.6"
-python-docx = "^1.0.1"
-openpyxl = "^3.1.2"
-Pillow = "^10.1.0"
-pydantic-settings = "^2.1.0"
-python-dotenv = "^1.0.0"
+sqladmin = "^0.20.1"
+itsdangerous = "^2.2.0"
+pyjwt = "^2.10.1"
+bcrypt = "4.0.1"
+torch = "^2.1.0"
+torchvision = "^0.16.0"
+transformers = "^4.35.0"
+numpy = "^1.24.0"
+pymupdf = "^1.23.8"
+slowapi = "^0.1.9"
 
-[tool.poetry.dev-dependencies]
-pytest = "^7.4.3"
-pytest-asyncio = "^0.21.1"
-black = "^23.11.0"
-isort = "^5.12.0"
-flake8 = "^6.1.0"
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
+requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
