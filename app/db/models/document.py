@@ -1,12 +1,15 @@
 from sqlalchemy import String, Integer, DateTime, Enum, ForeignKey, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship, Mapped, mapped_column
-from typing import List
-from app.db.session import Base
+from typing import List, TYPE_CHECKING
+
+from app.db.base_class import Base
 from app.schemas.document import DocumentType
-from app.db.models.user import User
 from app.db.models.analysis_result import AnalysisResult
 from app.schemas.analysis import AnalysisStatus
+
+if TYPE_CHECKING:
+    from app.db.models.user import User
 
 class Document(Base):
     __tablename__ = "documents"

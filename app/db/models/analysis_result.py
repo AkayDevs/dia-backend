@@ -1,10 +1,14 @@
-from app.db.base import Base
-from app.schemas.analysis import AnalysisType
 from sqlalchemy import String, ForeignKey, Index, Enum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import DateTime
 from sqlalchemy import func
-from app.db.models.document import Document
+
+from app.db.base_class import Base
+from app.schemas.analysis import AnalysisType
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.db.models.document import Document
 
 
 class AnalysisResult(Base):

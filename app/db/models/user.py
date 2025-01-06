@@ -1,11 +1,13 @@
 from sqlalchemy import String, DateTime, Enum, Boolean, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship, Mapped, mapped_column
-from typing import List
+from typing import TYPE_CHECKING, List
 
-from app.db.session import Base
-from app.db.models.document import Document
+from app.db.base_class import Base
 from app.schemas.user import UserRole
+
+if TYPE_CHECKING:
+    from app.db.models.document import Document
 
 
 class User(Base):
@@ -28,8 +30,9 @@ class User(Base):
     password_reset_expires: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
-    documents: Mapped[List["Document"]] = relationship(
-        Document,
+
+    documents = relationship(
+        "Document",
         back_populates="user",
         cascade="all, delete-orphan",
         lazy="selectin"
