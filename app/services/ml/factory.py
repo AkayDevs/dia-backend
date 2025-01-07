@@ -68,6 +68,10 @@ class BaseMLFactory(ABC):
     def validate_parameters(self, document_type: str, parameters: Dict[str, Any]) -> bool:
         """Validate parameters for document type."""
         try:
+            # Handle image types (jpg, jpeg, png) using the generic image format
+            if document_type.lower() in ["jpg", "jpeg", "png"]:
+                document_type = "image"
+            
             if document_type not in self.supported_formats:
                 raise UnsupportedFormatError(f"Document type '{document_type}' is not supported")
                 
@@ -127,19 +131,23 @@ class BaseMLFactory(ABC):
             # Ensure model is loaded
             self.ensure_model_loaded()
             
-            # Get document type
+            # Convert to absolute path
+            abs_path = Path(settings.UPLOAD_DIR) / file_path.replace("/uploads/", "")
+            if not abs_path.exists():
+                raise FileNotFoundError(f"Document not found at path: {abs_path}")
+            
+            # Get document type and handle image mime types
             document_type = Path(file_path).suffix.lower()[1:]
-            if document_type == "image":
-                # Handle image mime type
+            
+            # Handle image types
+            if document_type in ["jpg", "jpeg", "png"]:
+                # Verify it's actually an image file
                 import imghdr
-                abs_path = Path(settings.UPLOAD_DIR) / file_path.replace("/uploads/", "")
-                if not abs_path.exists():
-                    raise FileNotFoundError(f"Document not found at path: {abs_path}")
-                actual_type = imghdr.what(abs_path)
-                if actual_type in ["png", "jpeg"]:
-                    document_type = "jpg" if actual_type == "jpeg" else actual_type
-                else:
-                    raise UnsupportedFormatError(f"Unsupported image type: {actual_type}")
+                actual_type = imghdr.what(str(abs_path))
+                if actual_type not in ["jpeg", "png"]:
+                    raise UnsupportedFormatError(f"Unsupported or invalid image type: {actual_type}")
+                # Use generic 'image' type for parameter validation
+                document_type = "image"
             
             # Validate parameters for document type
             self.validate_parameters(document_type, parameters)
@@ -149,7 +157,7 @@ class BaseMLFactory(ABC):
                 await progress_callback(0.0, f"Starting {self.__class__.__name__.lower().replace('factory', '')}")
             
             # Process document
-            result = await self._process_document(file_path, parameters)
+            result = await self._process_document(str(abs_path), parameters)
             
             # Complete processing
             if progress_callback:
@@ -238,61 +246,7 @@ class TableDetectionFactory(BaseMLFactory):
                     }
                 }
             },
-            "png": {
-                "parameters": {
-                    "confidence_threshold": {
-                        "type": "float",
-                        "default": 0.5,
-                        "min": 0.0,
-                        "max": 1.0,
-                        "description": "Minimum confidence score for table detection"
-                    },
-                    "min_row_count": {
-                        "type": "integer",
-                        "default": 2,
-                        "min": 1,
-                        "description": "Minimum number of rows to consider as table"
-                    },
-                    "enhance_image": {
-                        "type": "boolean",
-                        "default": True,
-                        "description": "Whether to enhance image for better detection"
-                    },
-                    "extract_data": {
-                        "type": "boolean",
-                        "default": True,
-                        "description": "Whether to extract table data"
-                    }
-                }
-            },
-            "jpg": {
-                "parameters": {
-                    "confidence_threshold": {
-                        "type": "float",
-                        "default": 0.5,
-                        "min": 0.0,
-                        "max": 1.0,
-                        "description": "Minimum confidence score for table detection"
-                    },
-                    "min_row_count": {
-                        "type": "integer",
-                        "default": 2,
-                        "min": 1,
-                        "description": "Minimum number of rows to consider as table"
-                    },
-                    "enhance_image": {
-                        "type": "boolean",
-                        "default": True,
-                        "description": "Whether to enhance image for better detection"
-                    },
-                    "extract_data": {
-                        "type": "boolean",
-                        "default": True,
-                        "description": "Whether to extract table data"
-                    }
-                }
-            },
-            "jpeg": {
+            "image": {  # Generic image type for all image formats (png, jpg, jpeg)
                 "parameters": {
                     "confidence_threshold": {
                         "type": "float",
@@ -322,7 +276,7 @@ class TableDetectionFactory(BaseMLFactory):
         }
     
     def get_description(self) -> str:
-        return "Detect and extract tables from documents using advanced computer vision models and document parsing. Supports PDF documents, Word documents, and images."
+        return "Detect and extract tables from documents using advanced computer vision models and document parsing. Supports PDF documents, Word documents, and images (PNG, JPG, JPEG)."
 
     async def _process_document(
         self,
@@ -336,21 +290,6 @@ class TableDetectionFactory(BaseMLFactory):
             # Log the document type for debugging
             logger.info(f"Processing document type: {document_type}")
             
-            # Convert to absolute path
-            abs_path = Path(settings.UPLOAD_DIR) / file_path.replace("/uploads/", "")
-            if not abs_path.exists():
-                raise FileNotFoundError(f"Document not found at path: {abs_path}")
-            
-            # Handle image mime types that might come as 'image'
-            if document_type == "image":
-                # Try to determine the actual image type from the file
-                import imghdr
-                actual_type = imghdr.what(str(abs_path))
-                if actual_type in ["png", "jpeg"]:
-                    document_type = "jpg" if actual_type == "jpeg" else actual_type
-                else:
-                    raise UnsupportedFormatError(f"Unsupported image type: {actual_type}")
-            
             # Get appropriate detector based on document type
             if document_type == "docx":
                 from .table_detection.word_detector import WordTableDetector
@@ -358,18 +297,18 @@ class TableDetectionFactory(BaseMLFactory):
             elif document_type == "pdf":
                 from .table_detection.pdf_detector import PDFTableDetector
                 detector = PDFTableDetector()
-            elif document_type in ["png", "jpg", "jpeg"]:
+            elif document_type in ["jpg", "jpeg", "png"]:
                 from .table_detection.image_detector import ImageTableDetector
                 detector = ImageTableDetector()
             else:
                 raise UnsupportedFormatError(f"Unsupported document type: {document_type}")
             
-            # Validate file using absolute path
-            if not detector.validate_file(str(abs_path)):
+            # Validate file
+            if not detector.validate_file(file_path):
                 raise ValidationError(f"Invalid or corrupted {document_type.upper()} file")
             
-            # Process using the detector with absolute path
-            tables = await detector.detect_tables(str(abs_path), parameters)
+            # Process using the detector
+            tables = await detector.detect_tables(file_path, parameters)
             return {"tables": tables}
             
         except FileNotFoundError as e:

@@ -106,31 +106,44 @@ class AnalysisOrchestrator:
             document = self._get_and_validate_document(document_id)
             document_type = self._get_document_type(document.url)
             
+            # Log for debugging
+            logger.info(f"Starting analysis - Type: {analysis_type}, Document type: {document_type}")
+            
             # 2. Get factory and check supported formats
             factory = self._get_factory(analysis_type)
             if not factory:
                 raise ValueError(f"Unsupported analysis type: {analysis_type}")
-                
-            if document_type not in factory.supported_formats:
+            
+            # 3. Validate document type support
+            try:
+                supported_params = factory.get_supported_parameters(document_type)
+            except UnsupportedFormatError as e:
                 supported = ", ".join(factory.supported_formats.keys())
                 raise ValueError(
                     f"Document type '{document_type}' is not supported for {analysis_type}. "
                     f"Supported formats are: {supported}"
                 )
             
-            # 3. Validate parameters
-            if not self.validate_parameters(analysis_type, document_type, parameters):
-                raise ValueError("Invalid parameters for analysis")
+            # 4. Validate parameters
+            try:
+                if not factory.validate_parameters(document_type, parameters):
+                    raise ValueError("Invalid parameters for analysis")
+            except Exception as e:
+                logger.error(f"Parameter validation failed: {str(e)}")
+                raise ValueError(f"Parameter validation failed: {str(e)}")
                 
-            # 4. Create analysis record
+            # 5. Create analysis record
             analysis = self._create_analysis_record(document_id, analysis_type, parameters)
             
             return analysis
             
-        except Exception as e:
+        except ValueError as e:
             logger.error(f"Failed to start analysis: {str(e)}")
             raise
-            
+        except Exception as e:
+            logger.error(f"Unexpected error starting analysis: {str(e)}")
+            raise ValueError(f"Failed to start analysis: {str(e)}")
+
     async def process_analysis(self, analysis_id: str):
         """Public method to process the analysis in background."""
         return await self._process_analysis(analysis_id)
@@ -195,7 +208,13 @@ class AnalysisOrchestrator:
     def _get_document_type(self, url: str) -> str:
         """Get document type from URL."""
         ext = Path(url).suffix.lower()
-        return ext[1:] if ext else ""
+        document_type = ext[1:] if ext else ""
+        
+        # Convert image types to generic 'image' type
+        if document_type.lower() in ["jpg", "jpeg", "png"]:
+            return "image"
+            
+        return document_type
         
     def _create_analysis_record(
         self,

@@ -98,22 +98,17 @@ class ImageTableDetector(BaseTableDetector):
             logger.error(f"Image enhancement failed: {str(e)}")
             return image  # Return original if enhancement fails
 
-    def detect_tables(
+    async def detect_tables(
         self, 
         file_path: str, 
-        confidence_threshold: float = 0.5,
-        enhance_image: bool = True,
-        extract_data: bool = True,
-        **kwargs
+        parameters: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """
         Detect and extract tables from an image.
         
         Args:
             file_path: Path to the image file
-            confidence_threshold: Minimum confidence score for detections
-            enhance_image: Whether to apply image enhancement
-            extract_data: Whether to extract table data
+            parameters: Dictionary containing detection parameters
             
         Returns:
             List of detected tables with their properties and data
@@ -121,6 +116,11 @@ class ImageTableDetector(BaseTableDetector):
         logger.debug(f"Detecting tables in image: {file_path}")
         
         try:
+            # Get parameters with defaults
+            confidence_threshold = parameters.get("confidence_threshold", 0.5)
+            enhance_image = parameters.get("enhance_image", True)
+            extract_data = parameters.get("extract_data", True)
+            
             # Load and optionally enhance image
             image = Image.open(file_path)
             if enhance_image:
@@ -140,15 +140,16 @@ class ImageTableDetector(BaseTableDetector):
                 target_sizes=[original_size]
             )[0]
             
+            # Convert tensors to Python values
+            scores = results["scores"].tolist()
+            labels = results["labels"].tolist()
+            boxes = results["boxes"].tolist()
+            
             # Format detections
             tables = []
-            for score, label, box in zip(
-                results["scores"], 
-                results["labels"], 
-                results["boxes"]
-            ):
+            for score, label, box in zip(scores, labels, boxes):
                 # Convert box coordinates to integers
-                box = [int(x) for x in box.tolist()]
+                box = [int(i) for i in box]
                 
                 table = {
                     "confidence": float(score),
@@ -166,7 +167,7 @@ class ImageTableDetector(BaseTableDetector):
                 
                 # Extract table data if requested
                 if extract_data:
-                    table_data = self._extract_table_data(image, table)
+                    table_data = await self._extract_table_data(image, table)
                     table.update(table_data)
                 
                 tables.append(table)
@@ -181,7 +182,7 @@ class ImageTableDetector(BaseTableDetector):
             logger.error(f"Table detection failed: {str(e)}")
             raise
 
-    def _extract_table_data(
+    async def _extract_table_data(
         self,
         image: Image.Image,
         table: Dict[str, Any]
@@ -233,10 +234,10 @@ class ImageTableDetector(BaseTableDetector):
                     })
             
             # Analyze structure
-            structure = self._analyze_table_structure(text_blocks, table)
+            structure = await self._analyze_table_structure(text_blocks, table)
             
             # Extract and organize data
-            data = self._organize_table_data(text_blocks, structure)
+            data = await self._organize_table_data(text_blocks, structure)
             
             return {
                 "structure": structure,
@@ -275,7 +276,7 @@ class ImageTableDetector(BaseTableDetector):
             logger.warning(f"Image enhancement failed: {str(e)}")
             return img
 
-    def _analyze_table_structure(
+    async def _analyze_table_structure(
         self,
         text_blocks: List[Dict[str, Any]],
         table: Dict[str, Any]
@@ -436,7 +437,7 @@ class ImageTableDetector(BaseTableDetector):
             "confidence": 1.0
         }
 
-    def _organize_table_data(
+    async def _organize_table_data(
         self,
         text_blocks: List[Dict[str, Any]],
         structure: Dict[str, Any]
