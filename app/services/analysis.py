@@ -1,4 +1,4 @@
-from typing import Optional, Dict, Any, List, Type
+from typing import Optional, Dict, Any, List, Type, Union
 from datetime import datetime
 import uuid
 from sqlalchemy.orm import Session
@@ -7,6 +7,7 @@ from pathlib import Path
 import logging
 import asyncio
 from fastapi import HTTPException, status
+from pydantic import ValidationError
 
 from app.db.models.document import Document
 from app.db.models.analysis_result import AnalysisResult
@@ -17,15 +18,14 @@ from app.schemas.analysis import (
     AnalysisType,
     AnalysisStatus,
     AnalysisResultCreate,
-    AnalysisResultUpdate
+    AnalysisResultUpdate,
+    TableDetectionResult,
+    TextExtractionResult,
+    TextSummarizationResult,
+    TemplateConversionResult
 )
 from app.services.ml.factory import (
-    TableDetectionFactory,
-    TextExtractionFactory,
-    TextSummarizationFactory,
-    TemplateConversionFactory,
     FACTORY_MAP,
-    UnsupportedFormatError
 )
 
 logger = logging.getLogger(__name__)
@@ -247,10 +247,39 @@ class AnalysisOrchestrator:
         self,
         analysis_id: str,
         status: AnalysisStatus,
-        result: Optional[Dict[str, Any]] = None,
+        result: Optional[Union[Dict[str, Any], TableDetectionResult, TextExtractionResult, TextSummarizationResult, TemplateConversionResult]] = None,
         error: Optional[str] = None
     ) -> None:
-        """Update analysis status and results."""
+        """Update analysis status and results with type validation."""
+        # Get the current analysis to determine its type
+        current_analysis = crud_analysis.get(self.db, id=analysis_id)
+        if not current_analysis:
+            raise ValueError(f"Analysis with id {analysis_id} not found")
+
+        # Validate result if provided
+        if result is not None:
+            result_schemas = {
+                AnalysisType.TABLE_DETECTION: TableDetectionResult,
+                AnalysisType.TEXT_EXTRACTION: TextExtractionResult,
+                AnalysisType.TEXT_SUMMARIZATION: TextSummarizationResult,
+                AnalysisType.TEMPLATE_CONVERSION: TemplateConversionResult
+            }
+            
+            schema_cls = result_schemas.get(current_analysis.type)
+            if schema_cls:
+                try:
+                    # If result is already a validated object, just convert to dict
+                    if isinstance(result, schema_cls):
+                        result = result.model_dump()
+                    # If result is a dict, validate it
+                    elif isinstance(result, dict):
+                        validated_result = schema_cls(**result)
+                        result = validated_result.model_dump()
+                    else:
+                        raise ValueError(f"Result must be either a dictionary or a {schema_cls.__name__} object")
+                except ValidationError as e:
+                    raise ValueError(f"Invalid result format for {current_analysis.type}: {str(e)}")
+
         update_data = AnalysisResultUpdate(
             status=status,
             result=result,

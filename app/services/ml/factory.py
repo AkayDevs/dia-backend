@@ -11,8 +11,13 @@ from app.schemas.analysis import (
     TextExtractionParameters,
     TextSummarizationParameters,
     TemplateConversionParameters,
-    AnalysisParameters
+    AnalysisParameters,
+    TableDetectionResult,
+    TextExtractionResult,
+    TextSummarizationResult,
+    TemplateConversionResult
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +114,7 @@ class BaseMLFactory(ABC):
         file_path: str,
         parameters: Dict[str, Any],
         progress_callback: Optional[Callable[[float, str], None]] = None
-    ) -> Dict[str, Any]:
+    ) -> TableDetectionResult | TextExtractionResult | TextSummarizationResult | TemplateConversionResult:
         """Process the document with progress tracking."""
         try:
             # Ensure model is loaded
@@ -186,8 +191,8 @@ class TableDetectionFactory(BaseMLFactory):
     async def _process_document(
         self,
         file_path: str,
-        parameters: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        parameters: TableDetectionParameters
+    ) -> TableDetectionResult:
         try:
             # Get file extension without the dot and convert to lowercase
             document_type = Path(file_path).suffix.lower()[1:]
@@ -215,11 +220,8 @@ class TableDetectionFactory(BaseMLFactory):
             # Process using the detector with validated parameters
             tables = await detector.detect_tables(file_path, parameters)
             
-            # Apply post-processing based on parameters
-            if parameters.get("min_row_count"):
-                tables = [t for t in tables if t.get("dimensions", {}).get("rows", 0) >= parameters["min_row_count"]]
-                
-            return {"tables": tables}
+            # Return the tables directly since filtering is done in detector
+            return tables
             
         except FileNotFoundError as e:
             logger.error(f"File not found error: {str(e)}")
