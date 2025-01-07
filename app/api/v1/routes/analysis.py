@@ -45,8 +45,8 @@ async def list_user_analyses(
     - analysis_type: Filter by type of analysis
     - status: Filter by analysis status
     - document_id: Filter by specific document
-    - start_date: Filter analyses after this date
-    - end_date: Filter analyses before this date
+    - start_date: Filter analyses after this date (YYYY-MM-DD)
+    - end_date: Filter analyses before this date (YYYY-MM-DD)
     - skip: Number of records to skip (pagination)
     - limit: Maximum number of records to return
     """
