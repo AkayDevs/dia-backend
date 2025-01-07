@@ -26,7 +26,8 @@ from app.services.ml.factory import (
     TextExtractionFactory,
     TextSummarizationFactory,
     TemplateConversionFactory,
-    FACTORY_MAP
+    FACTORY_MAP,
+    UnsupportedFormatError
 )
 
 logger = logging.getLogger(__name__)
