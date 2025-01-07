@@ -2,6 +2,7 @@ from typing import Any, List, Optional, Dict
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status, Query
 from sqlalchemy.orm import Session
 import logging
+from datetime import datetime
 
 from app.core.auth import get_current_active_verified_user
 from app.db import deps
@@ -23,6 +24,88 @@ from app.crud.crud_document import document as crud_document
 
 router = APIRouter()
 logger = logging.getLogger("app.api.analysis")
+
+
+@router.get("/", response_model=List[AnalysisResult])
+async def list_user_analyses(
+    analysis_type: Optional[AnalysisType] = None,
+    status: Optional[AnalysisStatus] = None,
+    document_id: Optional[str] = None,
+    start_date: Optional[str] = Query(None, description="Filter analyses after this date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="Filter analyses before this date (YYYY-MM-DD)"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(get_current_active_verified_user),
+) -> Any:
+    """
+    List all analyses for the current user with optional filtering.
+    
+    Parameters:
+    - analysis_type: Filter by type of analysis
+    - status: Filter by analysis status
+    - document_id: Filter by specific document
+    - start_date: Filter analyses after this date
+    - end_date: Filter analyses before this date
+    - skip: Number of records to skip (pagination)
+    - limit: Maximum number of records to return
+    """
+    logger.info(f"Listing analyses for user: {current_user.id}")
+    
+    try:
+        analysis_orchestrator = AnalysisOrchestrator(db)
+        
+        # Get user's documents
+        documents = db.query(Document).filter(
+            Document.user_id == current_user.id
+        )
+        if document_id:
+            documents = documents.filter(Document.id == document_id)
+        
+        document_ids = [doc.id for doc in documents.all()]
+        
+        if not document_ids:
+            return []
+
+        all_analyses = []
+        for doc_id in document_ids:
+            # Use existing get_document_analyses method for each document
+            analyses = analysis_orchestrator.get_document_analyses(
+                document_id=doc_id,
+                analysis_type=analysis_type,
+                status=status,
+                skip=0,  # We'll handle pagination after combining results
+                limit=None  # Get all for this document
+            )
+            all_analyses.extend(analyses)
+
+        # Apply date filters if provided
+        if start_date:
+            start_datetime = datetime.strptime(start_date, "%Y-%m-%d")
+            all_analyses = [a for a in all_analyses if a.created_at >= start_datetime]
+        
+        if end_date:
+            end_datetime = datetime.strptime(end_date, "%Y-%m-%d")
+            all_analyses = [a for a in all_analyses if a.created_at <= end_datetime]
+
+        # Sort by created_at descending
+        all_analyses.sort(key=lambda x: x.created_at, reverse=True)
+
+        # Apply pagination
+        return all_analyses[skip:skip + limit]
+
+    except ValueError as e:
+        logger.error(f"Validation error in list_user_analyses: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error listing user analyses: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error retrieving analysis results"
+        ) 
 
 
 @router.get("/types", response_model=List[dict])
@@ -383,4 +466,4 @@ async def delete_analysis(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error deleting analysis result"
-        ) 
+        )
