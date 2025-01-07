@@ -123,6 +123,32 @@ class AnalysisResult(AnalysisResultBase):
     )
 
 
+def validate_analysis_parameters(parameters: Dict[str, Any], analysis_type: Optional[AnalysisType]) -> Dict[str, Any]:
+    """Validate parameters based on analysis type.
+    
+    Args:
+        parameters: Parameters to validate
+        analysis_type: Type of analysis these parameters are for
+        
+    Returns:
+        Dict[str, Any]: Validated and normalized parameters
+    """
+    if not analysis_type:
+        return parameters
+
+    parameter_models = {
+        AnalysisType.TABLE_DETECTION: TableDetectionParameters,
+        AnalysisType.TEXT_EXTRACTION: TextExtractionParameters,
+        AnalysisType.TEXT_SUMMARIZATION: TextSummarizationParameters,
+        AnalysisType.TEMPLATE_CONVERSION: TemplateConversionParameters
+    }
+
+    model = parameter_models.get(analysis_type)
+    if model:
+        return model(**parameters).model_dump()
+    return parameters
+
+
 class AnalysisRequest(BaseModel):
     """Request to perform analysis on a document."""
     analysis_type: AnalysisType = Field(..., description="Type of analysis to perform")
@@ -132,23 +158,9 @@ class AnalysisRequest(BaseModel):
     )
 
     @validator("parameters")
-    def validate_parameters(cls, v, values):
+    def validate_parameters(cls, v: Dict[str, Any], values: Dict[str, Any]) -> Dict[str, Any]:
         """Validate parameters based on analysis type."""
-        analysis_type = values.get("analysis_type")
-        if not analysis_type:
-            return v
-
-        parameter_models = {
-            AnalysisType.TABLE_DETECTION: TableDetectionParameters,
-            AnalysisType.TEXT_EXTRACTION: TextExtractionParameters,
-            AnalysisType.TEXT_SUMMARIZATION: TextSummarizationParameters,
-            AnalysisType.TEMPLATE_CONVERSION: TemplateConversionParameters
-        }
-
-        model = parameter_models.get(analysis_type)
-        if model:
-            return model(**v).model_dump()
-        return v
+        return validate_analysis_parameters(v, values.get("analysis_type"))
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -174,9 +186,9 @@ class BatchAnalysisDocument(BaseModel):
     )
 
     @validator("parameters")
-    def validate_parameters(cls, v, values):
+    def validate_parameters(cls, v: Dict[str, Any], values: Dict[str, Any]) -> Dict[str, Any]:
         """Validate parameters based on analysis type."""
-        return AnalysisRequest.validate_parameters(cls, v, values)
+        return validate_analysis_parameters(v, values.get("analysis_type"))
 
     model_config = ConfigDict(
         json_schema_extra={

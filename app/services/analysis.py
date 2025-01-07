@@ -94,7 +94,20 @@ class AnalysisOrchestrator:
         return factory.validate_parameters(document_type, parameters)
         
     async def start_analysis(self, document_id: str, analysis_type: AnalysisType, parameters: Dict[str, Any]) -> AnalysisResult:
-        """Start an analysis process."""
+        """Start an analysis process.
+        
+        Args:
+            document_id: ID of the document to analyze
+            analysis_type: Type of analysis to perform
+            parameters: Analysis-specific parameters
+            
+        Returns:
+            AnalysisResult: Created analysis record
+            
+        Raises:
+            ValueError: If document not found, analysis type not supported,
+                      document type not supported, or invalid parameters
+        """
         try:
             # 1. Get document and validate
             document = self._get_and_validate_document(document_id)
@@ -103,16 +116,14 @@ class AnalysisOrchestrator:
             # Log for debugging
             logger.info(f"Starting analysis - Type: {analysis_type}, Document type: {document_type}")
             
-            # 2. Get factory and check supported formats
+            # 2. Get factory and validate it exists
             factory = self._get_factory(analysis_type)
             if not factory:
                 raise ValueError(f"Unsupported analysis type: {analysis_type}")
             
             # 3. Validate document type support
-            try:
-                supported_params = factory.get_supported_parameters(document_type)
-            except UnsupportedFormatError as e:
-                supported = ", ".join(factory.supported_formats.keys())
+            if document_type not in factory.supported_formats:
+                supported = ", ".join(factory.supported_formats)
                 raise ValueError(
                     f"Document type '{document_type}' is not supported for {analysis_type}. "
                     f"Supported formats are: {supported}"
@@ -120,7 +131,7 @@ class AnalysisOrchestrator:
             
             # 4. Validate parameters
             try:
-                if not factory.validate_parameters(document_type, parameters):
+                if not self.validate_parameters(analysis_type, document_type, parameters):
                     raise ValueError("Invalid parameters for analysis")
             except Exception as e:
                 logger.error(f"Parameter validation failed: {str(e)}")

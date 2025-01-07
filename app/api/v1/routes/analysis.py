@@ -19,6 +19,7 @@ from app.schemas.analysis import (
 )
 from app.services.analysis import AnalysisOrchestrator
 from app.exceptions import DocumentNotFoundError
+from app.crud.crud_document import document as crud_document
 
 router = APIRouter()
 logger = logging.getLogger("app.api.analysis")
@@ -90,9 +91,7 @@ async def create_batch_analysis(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(get_current_active_verified_user),
 ) -> Any:
-    """
-    Create multiple analysis tasks for multiple documents.
-    """
+    """Create multiple analysis tasks for multiple documents."""
     logger.info(f"Creating batch analysis for {len(batch_request.documents)} documents")
     
     analysis_orchestrator = AnalysisOrchestrator(db)
@@ -101,20 +100,17 @@ async def create_batch_analysis(
 
     for doc_request in batch_request.documents:
         try:
-            # Verify document ownership
-            document = db.query(Document).filter(
-                Document.id == doc_request.document_id,
-                Document.user_id == current_user.id
-            ).first()
+            # Verify document ownership using CRUD helper
+            document = crud_document.get_document_with_results(
+                db,
+                document_id=doc_request.document_id,
+                user_id=current_user.id
+            )
             
             if not document:
                 raise DocumentNotFoundError(f"Document not found: {doc_request.document_id}")
 
-            # Get supported parameters for validation
-            supported_params = analysis_orchestrator.get_supported_parameters(
-                doc_request.analysis_type,
-                document.type
-            )
+            
             
             # Validate parameters
             analysis_orchestrator.validate_parameters(
