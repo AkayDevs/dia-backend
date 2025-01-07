@@ -40,6 +40,9 @@ pytesseract = "^0.3.13"
 [tool.poetry.scripts]
 test-tables = "scripts.test_table_detection:main"
 
+[tool.poetry.group.dev.dependencies]
+debugpy = "^1.8.11"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"

@@ -16,8 +16,6 @@ from app.crud.crud_document import document as crud_document
 from app.schemas.analysis import (
     AnalysisType,
     AnalysisStatus,
-    AnalysisRequest,
-    AnalysisResult as AnalysisResultSchema,
     AnalysisResultCreate,
     AnalysisResultUpdate
 )
@@ -31,22 +29,6 @@ from app.services.ml.factory import (
 )
 
 logger = logging.getLogger(__name__)
-
-class DocumentNotFoundError(Exception):
-    """Exception raised when a document is not found."""
-    pass
-
-class AnalysisError(Exception):
-    """Base exception for analysis-related errors."""
-    pass
-
-class ParameterValidationError(AnalysisError):
-    """Exception raised when analysis parameters are invalid."""
-    pass
-
-class UnsupportedAnalysisError(AnalysisError):
-    """Exception raised when analysis type is not supported for document type."""
-    pass
 
 class AnalysisOrchestrator:
     """Orchestrates the complete analysis workflow."""
@@ -84,13 +66,24 @@ class AnalysisOrchestrator:
         """Delete an analysis record."""
         crud_analysis.remove(self.db, id=analysis_id)
 
-    def get_supported_parameters(self, analysis_type: AnalysisType, document_type: str) -> Dict[str, Any]:
-        """Get supported parameters for a specific analysis type and document type."""
+    def get_supported_parameters(self, analysis_type: AnalysisType) -> Dict[str, Any]:
+        """Get supported parameters for a specific analysis type.
+        
+        Args:
+            analysis_type: Type of analysis to get parameters for
+            
+        Returns:
+            Dict containing parameter definitions with their types,
+            default values, constraints, and descriptions.
+            
+        Raises:
+            ValueError: If analysis type is not supported
+        """
         factory = self._get_factory(analysis_type)
         if not factory:
             raise ValueError(f"Unsupported analysis type: {analysis_type}")
             
-        return factory.get_supported_parameters(document_type)
+        return factory.get_supported_parameters()
         
     def validate_parameters(self, analysis_type: AnalysisType, document_type: str, parameters: Dict[str, Any]) -> bool:
         """Validate parameters for a specific analysis type and document type."""

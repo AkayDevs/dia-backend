@@ -1,4 +1,4 @@
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Dict
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status, Query
 from sqlalchemy.orm import Session
 import logging
@@ -17,7 +17,8 @@ from app.schemas.analysis import (
     BatchAnalysisResponse,
     BatchAnalysisError
 )
-from app.services.analysis import AnalysisOrchestrator, DocumentNotFoundError
+from app.services.analysis import AnalysisOrchestrator
+from app.exceptions import DocumentNotFoundError
 
 router = APIRouter()
 logger = logging.getLogger("app.api.analysis")
@@ -45,16 +46,18 @@ async def list_analysis_types(
                 # Get factory instance
                 factory = analysis_orchestrator._get_factory(analysis_type)
                 if not factory:
+                    logger.info(f"Factory not found for {analysis_type}")
                     continue
                 
                 # Get description and supported formats directly from factory
                 description = factory.get_description()
-                supported_formats = list(factory.supported_formats.keys())
+                supported_formats = list(factory.supported_formats)
                 
-                # Get parameters using the first supported format
-                if supported_formats:
-                    parameters = factory.get_supported_parameters(supported_formats[0])
-                else:
+                # Get parameters using orchestrator
+                try:
+                    parameters = analysis_orchestrator.get_supported_parameters(analysis_type)
+                except ValueError as e:
+                    logger.warning(f"Error getting parameters for {analysis_type}: {str(e)}")
                     continue
                 
                 analysis_types.append({
@@ -198,8 +201,7 @@ async def create_analysis(
         
         # Get supported parameters for validation
         supported_params = analysis_orchestrator.get_supported_parameters(
-            analysis_request.analysis_type,
-            document.type
+            analysis_request.analysis_type
         )
         
         # Validate parameters
@@ -327,46 +329,19 @@ async def get_analysis(
         )
 
 
-@router.get("/parameters/{document_id}/{analysis_type}", response_model=dict)
+@router.get("/types/{analysis_type}/parameters")
 async def get_analysis_parameters(
-    document_id: str,
     analysis_type: AnalysisType,
-    db: Session = Depends(deps.get_db),
-    current_user: User = Depends(get_current_active_verified_user),
-) -> Any:
-    """
-    Get supported parameters for a specific analysis type and document.
-    """
-    logger.info(f"Getting parameters for {analysis_type} on document: {document_id}")
-    
-    # Verify document ownership
-    document = db.query(Document).filter(
-        Document.id == document_id,
-        Document.user_id == current_user.id
-    ).first()
-    
-    if not document:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found"
-        )
-    
+    db: Session = Depends(deps.get_db)
+) -> Dict[str, Any]:
+    """Get supported parameters for an analysis type."""
     try:
         analysis_orchestrator = AnalysisOrchestrator(db)
-        return analysis_orchestrator.get_supported_parameters(
-            analysis_type,
-            document.type
-        )
+        return analysis_orchestrator.get_supported_parameters(analysis_type)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
-        )
-    except Exception as e:
-        logger.error(f"Error getting parameters: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error retrieving parameters"
         )
 
 
