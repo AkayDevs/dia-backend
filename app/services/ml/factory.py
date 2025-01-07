@@ -4,6 +4,7 @@ import logging
 import torch
 from app.schemas.analysis import AnalysisType
 from pathlib import Path
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,10 @@ class UnsupportedFormatError(Exception):
     """Raised when document format is not supported."""
     pass
 
+class ValidationError(Exception):
+    """Raised when parameter validation fails."""
+    pass
+
 class BaseMLFactory(ABC):
     """Base class for ML model factories."""
     
@@ -26,6 +31,7 @@ class BaseMLFactory(ABC):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model: Optional[torch.nn.Module] = None
         self.supported_formats: Dict[str, Dict[str, Any]] = {}
+        logger.info(f"Initialized {self.__class__.__name__} with device: {self.device}")
         
     @abstractmethod
     def get_description(self) -> str:
@@ -37,7 +43,7 @@ class BaseMLFactory(ABC):
         try:
             # Placeholder for model loading - will be implemented by subclasses
             self.model = None
-            logger.info(f"{self.__class__.__name__} model loaded")
+            logger.info(f"{self.__class__.__name__} model loaded successfully")
         except Exception as e:
             logger.error(f"Failed to load {self.__class__.__name__} model: {str(e)}")
             raise ModelLoadError(f"Failed to load {self.__class__.__name__} model: {str(e)}")
@@ -45,6 +51,7 @@ class BaseMLFactory(ABC):
     def ensure_model_loaded(self) -> None:
         """Ensure model is loaded before processing."""
         if self.model is None:
+            logger.debug(f"Loading model for {self.__class__.__name__}")
             self.load_model()
             
     def to_device(self, data: torch.Tensor) -> torch.Tensor:
@@ -54,44 +61,60 @@ class BaseMLFactory(ABC):
     def get_supported_parameters(self, document_type: str) -> Dict[str, Any]:
         """Get supported parameters for document type."""
         if document_type not in self.supported_formats:
-            raise UnsupportedFormatError(f"Unsupported document type: {document_type}")
+            logger.error(f"Unsupported document type: {document_type}")
+            raise UnsupportedFormatError(f"Document type '{document_type}' is not supported")
         return self.supported_formats[document_type]["parameters"]
         
     def validate_parameters(self, document_type: str, parameters: Dict[str, Any]) -> bool:
         """Validate parameters for document type."""
-        if document_type not in self.supported_formats:
-            return False
-            
-        supported_params = self.supported_formats[document_type]["parameters"]
-        
         try:
+            if document_type not in self.supported_formats:
+                raise UnsupportedFormatError(f"Document type '{document_type}' is not supported")
+                
+            supported_params = self.supported_formats[document_type]["parameters"]
+            
+            # Add default values for missing parameters
+            for param_name, param_spec in supported_params.items():
+                if param_name not in parameters and "default" in param_spec:
+                    parameters[param_name] = param_spec["default"]
+            
+            # Validate parameters
             for param_name, param_spec in supported_params.items():
                 if param_name in parameters:
                     value = parameters[param_name]
                     
-                    # Type checking
+                    # Type checking and conversion
                     if param_spec["type"] == "float":
                         value = float(value)
+                        if "min" in param_spec and value < param_spec["min"]:
+                            raise ValidationError(f"Parameter '{param_name}' must be >= {param_spec['min']}")
+                        if "max" in param_spec and value > param_spec["max"]:
+                            raise ValidationError(f"Parameter '{param_name}' must be <= {param_spec['max']}")
                     elif param_spec["type"] == "integer":
                         value = int(value)
+                        if "min" in param_spec and value < param_spec["min"]:
+                            raise ValidationError(f"Parameter '{param_name}' must be >= {param_spec['min']}")
+                        if "max" in param_spec and value > param_spec["max"]:
+                            raise ValidationError(f"Parameter '{param_name}' must be <= {param_spec['max']}")
                     elif param_spec["type"] == "boolean":
                         if not isinstance(value, bool):
-                            return False
+                            raise ValidationError(f"Parameter '{param_name}' must be a boolean")
                     elif param_spec["type"] == "string":
                         if not isinstance(value, str):
-                            return False
+                            raise ValidationError(f"Parameter '{param_name}' must be a string")
                         if "enum" in param_spec and value not in param_spec["enum"]:
-                            return False
-                        
-                    # Range checking
-                    if "min" in param_spec and value < param_spec["min"]:
-                        return False
-                    if "max" in param_spec and value > param_spec["max"]:
-                        return False
-                        
+                            raise ValidationError(f"Parameter '{param_name}' must be one of: {param_spec['enum']}")
+                    
+                    parameters[param_name] = value
+                    
             return True
-        except (ValueError, TypeError):
-            return False
+            
+        except (ValueError, TypeError) as e:
+            logger.error(f"Parameter validation error: {str(e)}")
+            raise ValidationError(f"Parameter validation failed: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error during parameter validation: {str(e)}")
+            raise
 
     async def process(
         self,
@@ -101,16 +124,48 @@ class BaseMLFactory(ABC):
     ) -> Dict[str, Any]:
         """Process the document with progress tracking."""
         try:
+            # Ensure model is loaded
             self.ensure_model_loaded()
+            
+            # Get document type
+            document_type = Path(file_path).suffix.lower()[1:]
+            if document_type == "image":
+                # Handle image mime type
+                import imghdr
+                abs_path = Path(settings.UPLOAD_DIR) / file_path.replace("/uploads/", "")
+                if not abs_path.exists():
+                    raise FileNotFoundError(f"Document not found at path: {abs_path}")
+                actual_type = imghdr.what(abs_path)
+                if actual_type in ["png", "jpeg"]:
+                    document_type = "jpg" if actual_type == "jpeg" else actual_type
+                else:
+                    raise UnsupportedFormatError(f"Unsupported image type: {actual_type}")
+            
+            # Validate parameters for document type
+            self.validate_parameters(document_type, parameters)
+            
+            # Start processing
             if progress_callback:
                 await progress_callback(0.0, f"Starting {self.__class__.__name__.lower().replace('factory', '')}")
             
+            # Process document
             result = await self._process_document(file_path, parameters)
             
+            # Complete processing
             if progress_callback:
                 await progress_callback(1.0, f"{self.__class__.__name__.replace('Factory', '')} completed")
             
             return result
+            
+        except FileNotFoundError as e:
+            logger.error(f"Document not found: {str(e)}")
+            raise
+        except UnsupportedFormatError as e:
+            logger.error(f"Unsupported format: {str(e)}")
+            raise
+        except ValidationError as e:
+            logger.error(f"Validation error: {str(e)}")
+            raise
         except Exception as e:
             logger.error(f"Error in {self.__class__.__name__.lower()}: {str(e)}")
             raise ProcessingError(f"{self.__class__.__name__.replace('Factory', '')} failed: {str(e)}")
@@ -145,6 +200,21 @@ class TableDetectionFactory(BaseMLFactory):
                         "default": 2,
                         "min": 1,
                         "description": "Minimum number of rows to consider as table"
+                    },
+                    "use_ml_detection": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Whether to use ML-based detection"
+                    },
+                    "extract_data": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Whether to extract table data"
+                    },
+                    "enhance_image": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Whether to enhance images for OCR"
                     }
                 }
             },
@@ -156,10 +226,15 @@ class TableDetectionFactory(BaseMLFactory):
                         "min": 1,
                         "description": "Minimum number of rows to consider as table"
                     },
-                    "detect_headers": {
+                    "extract_structure": {
                         "type": "boolean",
                         "default": True,
-                        "description": "Whether to detect and mark table headers"
+                        "description": "Whether to analyze table structure"
+                    },
+                    "extract_data": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Whether to extract table data"
                     }
                 }
             },
@@ -171,6 +246,22 @@ class TableDetectionFactory(BaseMLFactory):
                         "min": 0.0,
                         "max": 1.0,
                         "description": "Minimum confidence score for table detection"
+                    },
+                    "min_row_count": {
+                        "type": "integer",
+                        "default": 2,
+                        "min": 1,
+                        "description": "Minimum number of rows to consider as table"
+                    },
+                    "enhance_image": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Whether to enhance image for better detection"
+                    },
+                    "extract_data": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Whether to extract table data"
                     }
                 }
             },
@@ -182,6 +273,22 @@ class TableDetectionFactory(BaseMLFactory):
                         "min": 0.0,
                         "max": 1.0,
                         "description": "Minimum confidence score for table detection"
+                    },
+                    "min_row_count": {
+                        "type": "integer",
+                        "default": 2,
+                        "min": 1,
+                        "description": "Minimum number of rows to consider as table"
+                    },
+                    "enhance_image": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Whether to enhance image for better detection"
+                    },
+                    "extract_data": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Whether to extract table data"
                     }
                 }
             },
@@ -193,6 +300,22 @@ class TableDetectionFactory(BaseMLFactory):
                         "min": 0.0,
                         "max": 1.0,
                         "description": "Minimum confidence score for table detection"
+                    },
+                    "min_row_count": {
+                        "type": "integer",
+                        "default": 2,
+                        "min": 1,
+                        "description": "Minimum number of rows to consider as table"
+                    },
+                    "enhance_image": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Whether to enhance image for better detection"
+                    },
+                    "extract_data": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Whether to extract table data"
                     }
                 }
             }
@@ -207,22 +330,57 @@ class TableDetectionFactory(BaseMLFactory):
         parameters: Dict[str, Any]
     ) -> Dict[str, Any]:
         try:
+            # Get file extension without the dot and convert to lowercase
             document_type = Path(file_path).suffix.lower()[1:]
+            
+            # Log the document type for debugging
+            logger.info(f"Processing document type: {document_type}")
+            
+            # Convert to absolute path
+            abs_path = Path(settings.UPLOAD_DIR) / file_path.replace("/uploads/", "")
+            if not abs_path.exists():
+                raise FileNotFoundError(f"Document not found at path: {abs_path}")
+            
+            # Handle image mime types that might come as 'image'
+            if document_type == "image":
+                # Try to determine the actual image type from the file
+                import imghdr
+                actual_type = imghdr.what(str(abs_path))
+                if actual_type in ["png", "jpeg"]:
+                    document_type = "jpg" if actual_type == "jpeg" else actual_type
+                else:
+                    raise UnsupportedFormatError(f"Unsupported image type: {actual_type}")
             
             # Get appropriate detector based on document type
             if document_type == "docx":
-                from .detectors.word_detector import WordTableDetector
+                from .table_detection.word_detector import WordTableDetector
                 detector = WordTableDetector()
             elif document_type == "pdf":
-                from .detectors.pdf_detector import PDFTableDetector
+                from .table_detection.pdf_detector import PDFTableDetector
                 detector = PDFTableDetector()
-            else:  # Image formats
-                from .detectors.image_detector import ImageTableDetector
+            elif document_type in ["png", "jpg", "jpeg"]:
+                from .table_detection.image_detector import ImageTableDetector
                 detector = ImageTableDetector()
+            else:
+                raise UnsupportedFormatError(f"Unsupported document type: {document_type}")
             
-            # Process using the detector
-            return await detector.detect(file_path, parameters)
+            # Validate file using absolute path
+            if not detector.validate_file(str(abs_path)):
+                raise ValidationError(f"Invalid or corrupted {document_type.upper()} file")
             
+            # Process using the detector with absolute path
+            tables = await detector.detect_tables(str(abs_path), parameters)
+            return {"tables": tables}
+            
+        except FileNotFoundError as e:
+            logger.error(f"File not found error: {str(e)}")
+            raise
+        except ValidationError as e:
+            logger.error(f"Validation error: {str(e)}")
+            raise
+        except UnsupportedFormatError as e:
+            logger.error(f"Format error: {str(e)}")
+            raise
         except Exception as e:
             logger.error(f"Error in table detection: {str(e)}")
             raise ProcessingError(f"Table detection failed: {str(e)}")
@@ -317,17 +475,20 @@ class TextExtractionFactory(BaseMLFactory):
             
             # Get appropriate detector based on document type
             if document_type == "docx":
-                from .detectors.word_detector import WordTextExtractor
+                from .table_detection.word_detector import WordTextExtractor
                 detector = WordTextExtractor()
             elif document_type == "pdf":
-                from .detectors.pdf_detector import PDFTextExtractor
+                from .table_detection.pdf_detector import PDFTextExtractor
                 detector = PDFTextExtractor()
-            else:  # Image formats
-                from .detectors.image_detector import ImageTextExtractor
+            elif document_type in ["png", "jpg", "jpeg"]:
+                from .table_detection.image_detector import ImageTextExtractor
                 detector = ImageTextExtractor()
+            else:
+                raise UnsupportedFormatError(f"Unsupported document type: {document_type}")
             
             # Process using the detector
-            return await detector.detect(file_path, parameters)
+            text = await detector.extract_text(file_path, parameters)
+            return {"text": text}
             
         except Exception as e:
             logger.error(f"Error in text extraction: {str(e)}")

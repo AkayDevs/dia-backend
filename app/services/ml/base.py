@@ -1,17 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
-import logging
-
-logger = logging.getLogger(__name__)
 
 class BaseDocumentProcessor(ABC):
     """Base class for all document processing services."""
-    
-    @property
-    @abstractmethod
-    def supported_formats(self) -> List[str]:
-        """List of supported file formats."""
-        pass
     
     @abstractmethod
     def validate_file(self, file_path: str) -> bool:
@@ -22,54 +13,41 @@ class BaseTableDetector(BaseDocumentProcessor):
     """Base class for table detection algorithms."""
     
     @abstractmethod
-    def detect_tables(
+    async def detect_tables(
         self,
         file_path: str,
-        confidence_threshold: float = 0.5,
-        min_row_count: int = 2,
-        **kwargs
+        parameters: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
-        """Detect tables in a document."""
+        """
+        Detect tables in a document.
+        
+        Args:
+            file_path: Path to the document
+            parameters: Dictionary of parameters for detection
+                - confidence_threshold: float, minimum confidence for detection
+                - min_row_count: int, minimum number of rows to consider as table
+                - use_ml_detection: bool, whether to use ML-based detection
+                - extract_data: bool, whether to extract table data
+                - enhance_image: bool, whether to enhance images for OCR
+                
+        Returns:
+            List of dictionaries containing table information:
+            - page: int, page number (1-based)
+            - bbox: List[float], bounding box coordinates [x0, y0, x1, y1]
+            - rows: int, number of rows
+            - columns: int, number of columns
+            - data: List[List[str]], table content as 2D array
+        """
         pass
 
 class BaseTextExtractor(BaseDocumentProcessor):
     """Base class for text extraction algorithms."""
     
     @abstractmethod
-    def extract_text(
+    async def extract_text(
         self,
         file_path: str,
-        extract_layout: bool = True,
-        detect_lists: bool = True,
-        **kwargs
-    ) -> Dict[str, Any]:
+        parameters: Dict[str, Any]
+    ) -> str:
         """Extract text from a document."""
-        pass
-
-class BaseTextSummarizer(BaseDocumentProcessor):
-    """Base class for text summarization algorithms."""
-    
-    @abstractmethod
-    def summarize_text(
-        self,
-        text: str,
-        max_length: int = 150,
-        min_length: int = 50,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """Generate summary from text."""
-        pass
-
-class BaseTemplateConverter(BaseDocumentProcessor):
-    """Base class for template conversion algorithms."""
-    
-    @abstractmethod
-    def convert_template(
-        self,
-        file_path: str,
-        target_format: str,
-        preserve_styles: bool = True,
-        **kwargs
-    ) -> Dict[str, Any]:
-        """Convert document to target format."""
         pass

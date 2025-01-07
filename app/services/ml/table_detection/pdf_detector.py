@@ -645,35 +645,35 @@ class PDFTableDetector(BaseTableDetector):
         except (ValueError, TypeError):
             return text
 
-    def detect_tables(
+    async def detect_tables(
         self,
         file_path: str,
-        confidence_threshold: float = 0.5,
-        min_row_count: int = 2,
-        use_ml_detection: bool = True,
-        extract_data: bool = True,
-        enhance_image: bool = True,
-        **kwargs
+        parameters: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """
         Detect and extract tables from a PDF document.
         
         Args:
             file_path: Path to the PDF file
-            confidence_threshold: Minimum confidence score for ML detections
-            min_row_count: Minimum number of rows to consider as table
-            use_ml_detection: Whether to use ML-based detection
-            extract_data: Whether to extract table data
-            enhance_image: Whether to enhance images for OCR
-            
-        Returns:
-            List of detected tables with their properties and data
+            parameters: Dictionary of parameters for detection
+                - confidence_threshold: float, minimum confidence for detection
+                - min_row_count: int, minimum number of rows to consider as table
+                - use_ml_detection: bool, whether to use ML-based detection
+                - extract_data: bool, whether to extract table data
+                - enhance_image: bool, whether to enhance images for OCR
         """
         logger.debug(f"Detecting tables in PDF: {file_path}")
         
         try:
             # Open PDF
             doc = fitz.open(file_path)
+            
+            # Get parameters with defaults
+            confidence_threshold = parameters.get("confidence_threshold", 0.5)
+            min_row_count = parameters.get("min_row_count", 2)
+            use_ml_detection = parameters.get("use_ml_detection", True)
+            extract_data = parameters.get("extract_data", True)
+            enhance_image = parameters.get("enhance_image", True)
             
             # Check if ML detection should be used
             if use_ml_detection:
@@ -687,13 +687,9 @@ class PDFTableDetector(BaseTableDetector):
                 page_tables = []
                 
                 try:
-                    # Detect tables
-                    tables = super().detect_tables(
-                        page,
-                        confidence_threshold,
-                        min_row_count,
-                        use_ml_detection
-                    )
+                    # Detect lines for rule-based detection
+                    lines = self._detect_lines(page)
+                    tables = self._find_intersections(lines)
                     
                     # Extract data if requested
                     if extract_data:
@@ -713,15 +709,16 @@ class PDFTableDetector(BaseTableDetector):
                 
                 # Add page numbers
                 for table in page_tables:
-                    table["page_number"] = page_num + 1
+                    table["page"] = page_num + 1
                 
                 all_tables.extend(page_tables)
             
+            doc.close()
             return all_tables
             
-        finally:
-            if 'doc' in locals():
-                doc.close()
+        except Exception as e:
+            logger.error(f"Error in PDF table detection: {str(e)}")
+            raise
 
     def validate_file(self, file_path: str) -> bool:
         """
