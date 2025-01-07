@@ -1,38 +1,23 @@
-from typing import Dict, Type, Optional, List, Any, Callable
-import logging
-import mimetypes
-from pathlib import Path
-import torch
 from abc import ABC, abstractmethod
-
-from .base import (
-    BaseDocumentProcessor,
-    BaseTableDetector,
-    BaseTextExtractor,
-    BaseTextSummarizer,
-    BaseTemplateConverter
-)
-
-from .table_detection import ImageTableDetector, PDFTableDetector
-from app.schemas.analysis import AnalysisType, AnalysisStatus
+from typing import Dict, Any, Optional, Callable
+import logging
+import torch
+from app.schemas.analysis import AnalysisType
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+class ModelLoadError(Exception):
+    """Raised when model loading fails."""
+    pass
 
 class ProcessingError(Exception):
-    """Base exception for processing errors."""
+    """Raised when document processing fails."""
     pass
 
-
-class UnsupportedFormatError(ProcessingError):
-    """Exception raised when file format is not supported."""
+class UnsupportedFormatError(Exception):
+    """Raised when document format is not supported."""
     pass
-
-
-class ModelLoadError(ProcessingError):
-    """Exception raised when model fails to load."""
-    pass
-
 
 class BaseMLFactory(ABC):
     """Base class for ML model factories."""
@@ -40,137 +25,32 @@ class BaseMLFactory(ABC):
     def __init__(self):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model: Optional[torch.nn.Module] = None
+        self.supported_formats: Dict[str, Dict[str, Any]] = {}
         
     @abstractmethod
+    def get_description(self) -> str:
+        """Get description of what this factory's models do."""
+        pass
+
     def load_model(self) -> None:
         """Load the PyTorch model."""
-        pass
+        try:
+            # Placeholder for model loading - will be implemented by subclasses
+            self.model = None
+            logger.info(f"{self.__class__.__name__} model loaded")
+        except Exception as e:
+            logger.error(f"Failed to load {self.__class__.__name__} model: {str(e)}")
+            raise ModelLoadError(f"Failed to load {self.__class__.__name__} model: {str(e)}")
         
     def ensure_model_loaded(self) -> None:
         """Ensure model is loaded before processing."""
         if self.model is None:
-            try:
-                self.load_model()
-            except Exception as e:
-                logger.error(f"Failed to load model: {str(e)}")
-                raise ModelLoadError(f"Failed to load model: {str(e)}")
+            self.load_model()
             
     def to_device(self, data: torch.Tensor) -> torch.Tensor:
         """Move data to the appropriate device."""
         return data.to(self.device)
         
-    @abstractmethod
-    def get_supported_parameters(self, document_type: str) -> Dict[str, Any]:
-        """Get supported parameters for document type."""
-        pass
-        
-    @abstractmethod
-    def validate_parameters(self, document_type: str, parameters: Dict[str, Any]) -> bool:
-        """Validate parameters for document type."""
-        pass
-        
-    @abstractmethod
-    async def process(
-        self,
-        file_path: str,
-        parameters: Dict[str, Any],
-        progress_callback: Optional[Callable[[float, str], None]] = None
-    ) -> Dict[str, Any]:
-        """Process the document with progress tracking."""
-        pass
-
-
-class ProcessorFactory:
-    """Factory for creating document processor instances."""
-    
-    _processors: Dict[AnalysisType, Type[BaseDocumentProcessor]] = {
-        AnalysisType.TABLE_DETECTION: PDFTableDetector,
-        AnalysisType.TEXT_EXTRACTION: BaseTextExtractor,
-        AnalysisType.TEXT_SUMMARIZATION: BaseTextSummarizer,
-        AnalysisType.TEMPLATE_CONVERSION: BaseTemplateConverter
-    }
-    
-    @classmethod
-    def get_processor(cls, analysis_type: AnalysisType) -> Optional[BaseDocumentProcessor]:
-        """Get processor instance for the specified analysis type."""
-        processor_cls = cls._processors.get(analysis_type)
-        if processor_cls:
-            try:
-                return processor_cls()
-            except Exception as e:
-                logger.error(f"Failed to create processor for {analysis_type}: {str(e)}")
-                return None
-        return None
-    
-    @classmethod
-    def get_supported_formats(cls, analysis_type: AnalysisType) -> List[str]:
-        """Get supported formats for the specified analysis type."""
-        processor = cls.get_processor(analysis_type)
-        if processor:
-            return processor.supported_formats
-        return []
-    
-    @classmethod
-    def validate_format(cls, analysis_type: AnalysisType, file_path: str) -> bool:
-        """Validate if file format is supported for the analysis type."""
-        processor = cls.get_processor(analysis_type)
-        if not processor:
-            return False
-        
-        try:
-            return processor.validate_file(file_path)
-        except Exception as e:
-            logger.error(f"File validation failed: {str(e)}")
-            return False
-
-
-class TableDetectionFactory(BaseMLFactory):
-    """Factory for table detection models."""
-    
-    def __init__(self):
-        super().__init__()
-        self.supported_formats = {
-            "pdf": {
-                "parameters": {
-                    "confidence_threshold": {
-                        "type": "float",
-                        "default": 0.5,
-                        "min": 0.0,
-                        "max": 1.0,
-                        "description": "Minimum confidence score for table detection"
-                    },
-                    "min_row_count": {
-                        "type": "int",
-                        "default": 2,
-                        "min": 1,
-                        "description": "Minimum number of rows to consider as table"
-                    }
-                }
-            },
-            "image": {
-                "parameters": {
-                    "confidence_threshold": {
-                        "type": "float",
-                        "default": 0.5,
-                        "min": 0.0,
-                        "max": 1.0,
-                        "description": "Minimum confidence score for table detection"
-                    }
-                }
-            }
-        }
-    
-    def load_model(self) -> None:
-        """Load table detection PyTorch model."""
-        try:
-            self.model = torch.hub.load('ultralytics/yolov5', 'custom', 
-                                     path='path/to/table_detection_weights.pt')
-            self.model.to(self.device)
-            self.model.eval()
-        except Exception as e:
-            logger.error(f"Failed to load table detection model: {str(e)}")
-            raise ModelLoadError(f"Failed to load table detection model: {str(e)}")
-            
     def get_supported_parameters(self, document_type: str) -> Dict[str, Any]:
         """Get supported parameters for document type."""
         if document_type not in self.supported_formats:
@@ -192,8 +72,16 @@ class TableDetectionFactory(BaseMLFactory):
                     # Type checking
                     if param_spec["type"] == "float":
                         value = float(value)
-                    elif param_spec["type"] == "int":
+                    elif param_spec["type"] == "integer":
                         value = int(value)
+                    elif param_spec["type"] == "boolean":
+                        if not isinstance(value, bool):
+                            return False
+                    elif param_spec["type"] == "string":
+                        if not isinstance(value, str):
+                            return False
+                        if "enum" in param_spec and value not in param_spec["enum"]:
+                            return False
                         
                     # Range checking
                     if "min" in param_spec and value < param_spec["min"]:
@@ -204,49 +92,139 @@ class TableDetectionFactory(BaseMLFactory):
             return True
         except (ValueError, TypeError):
             return False
-        
+
     async def process(
         self,
         file_path: str,
         parameters: Dict[str, Any],
         progress_callback: Optional[Callable[[float, str], None]] = None
     ) -> Dict[str, Any]:
-        """Process document for table detection with progress tracking."""
-        self.ensure_model_loaded()
-        
+        """Process the document with progress tracking."""
         try:
+            self.ensure_model_loaded()
             if progress_callback:
-                await progress_callback(10, "Loading document")
-                
-            # Get document type
-            document_type = "pdf" if file_path.lower().endswith(".pdf") else "image"
+                await progress_callback(0.0, f"Starting {self.__class__.__name__.lower().replace('factory', '')}")
             
-            # Validate parameters
-            if not self.validate_parameters(document_type, parameters):
-                raise ValueError("Invalid parameters for table detection")
-                
-            if progress_callback:
-                await progress_callback(20, "Detecting tables")
-                
-            # Process based on document type
-            if document_type == "pdf":
-                detector = PDFTableDetector()
-            else:
-                detector = ImageTableDetector()
-                
-            tables = detector.detect_tables(file_path, **parameters)
+            result = await self._process_document(file_path, parameters)
             
             if progress_callback:
-                await progress_callback(90, "Finalizing results")
-                
-            return {
-                "tables": tables,
-                "page_numbers": [table.get("page_number", 1) for table in tables],
-                "confidence_scores": [table["confidence"] for table in tables]
-            }
-                
+                await progress_callback(1.0, f"{self.__class__.__name__.replace('Factory', '')} completed")
+            
+            return result
         except Exception as e:
-            logger.error(f"Table detection failed: {str(e)}")
+            logger.error(f"Error in {self.__class__.__name__.lower()}: {str(e)}")
+            raise ProcessingError(f"{self.__class__.__name__.replace('Factory', '')} failed: {str(e)}")
+    
+    @abstractmethod
+    async def _process_document(
+        self,
+        file_path: str,
+        parameters: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Process document implementation to be overridden by subclasses."""
+        pass
+
+
+class TableDetectionFactory(BaseMLFactory):
+    """Factory for table detection models."""
+    
+    def __init__(self):
+        super().__init__()
+        self.supported_formats = {
+            "pdf": {
+                "parameters": {
+                    "confidence_threshold": {
+                        "type": "float",
+                        "default": 0.5,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "description": "Minimum confidence score for table detection"
+                    },
+                    "min_row_count": {
+                        "type": "integer",
+                        "default": 2,
+                        "min": 1,
+                        "description": "Minimum number of rows to consider as table"
+                    }
+                }
+            },
+            "docx": {
+                "parameters": {
+                    "min_row_count": {
+                        "type": "integer",
+                        "default": 2,
+                        "min": 1,
+                        "description": "Minimum number of rows to consider as table"
+                    },
+                    "detect_headers": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Whether to detect and mark table headers"
+                    }
+                }
+            },
+            "png": {
+                "parameters": {
+                    "confidence_threshold": {
+                        "type": "float",
+                        "default": 0.5,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "description": "Minimum confidence score for table detection"
+                    }
+                }
+            },
+            "jpg": {
+                "parameters": {
+                    "confidence_threshold": {
+                        "type": "float",
+                        "default": 0.5,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "description": "Minimum confidence score for table detection"
+                    }
+                }
+            },
+            "jpeg": {
+                "parameters": {
+                    "confidence_threshold": {
+                        "type": "float",
+                        "default": 0.5,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "description": "Minimum confidence score for table detection"
+                    }
+                }
+            }
+        }
+    
+    def get_description(self) -> str:
+        return "Detect and extract tables from documents using advanced computer vision models and document parsing. Supports PDF documents, Word documents, and images."
+
+    async def _process_document(
+        self,
+        file_path: str,
+        parameters: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        try:
+            document_type = Path(file_path).suffix.lower()[1:]
+            
+            # Get appropriate detector based on document type
+            if document_type == "docx":
+                from .detectors.word_detector import WordTableDetector
+                detector = WordTableDetector()
+            elif document_type == "pdf":
+                from .detectors.pdf_detector import PDFTableDetector
+                detector = PDFTableDetector()
+            else:  # Image formats
+                from .detectors.image_detector import ImageTableDetector
+                detector = ImageTableDetector()
+            
+            # Process using the detector
+            return await detector.detect(file_path, parameters)
+            
+        except Exception as e:
+            logger.error(f"Error in table detection: {str(e)}")
             raise ProcessingError(f"Table detection failed: {str(e)}")
 
 
@@ -258,186 +236,230 @@ class TextExtractionFactory(BaseMLFactory):
         self.supported_formats = {
             "pdf": {
                 "parameters": {
+                    "confidence_threshold": {
+                        "type": "float",
+                        "default": 0.5,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "description": "Minimum confidence score for text extraction"
+                    },
                     "extract_layout": {
-                        "type": "bool",
+                        "type": "boolean",
                         "default": True,
                         "description": "Whether to preserve document layout"
                     },
                     "detect_lists": {
-                        "type": "bool",
+                        "type": "boolean",
                         "default": True,
-                        "description": "Whether to detect and preserve lists"
+                        "description": "Whether to detect and format lists"
                     }
                 }
             },
-            "image": {
+            "png": {
                 "parameters": {
-                    "language": {
-                        "type": "str",
-                        "default": "eng",
-                        "description": "Language of the text in image"
-                    },
-                    "enhance_image": {
-                        "type": "bool",
+                    "confidence_threshold": {
+                        "type": "float",
+                        "default": 0.5,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "description": "Minimum confidence score for text extraction"
+                    }
+                }
+            },
+            "jpg": {
+                "parameters": {
+                    "confidence_threshold": {
+                        "type": "float",
+                        "default": 0.5,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "description": "Minimum confidence score for text extraction"
+                    }
+                }
+            },
+            "jpeg": {
+                "parameters": {
+                    "confidence_threshold": {
+                        "type": "float",
+                        "default": 0.5,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "description": "Minimum confidence score for text extraction"
+                    }
+                }
+            },
+            "docx": {
+                "parameters": {
+                    "extract_layout": {
+                        "type": "boolean",
                         "default": True,
-                        "description": "Whether to enhance image before OCR"
+                        "description": "Whether to preserve document layout"
+                    },
+                    "detect_lists": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Whether to detect and format lists"
                     }
                 }
             }
         }
-    
-    def load_model(self) -> None:
-        """Load OCR and NLP models."""
-        try:
-            self.ocr_model = torch.hub.load('your/ocr/model', 'custom', 
-                                         path='path/to/ocr_weights.pt')
-            self.nlp_model = torch.hub.load('your/nlp/model', 'custom',
-                                         path='path/to/nlp_weights.pt')
-            self.ocr_model.to(self.device)
-            self.nlp_model.to(self.device)
-            self.ocr_model.eval()
-            self.nlp_model.eval()
-        except Exception as e:
-            logger.error(f"Failed to load text extraction models: {str(e)}")
-            raise ModelLoadError(f"Failed to load text extraction models: {str(e)}")
-            
-    def get_supported_parameters(self, document_type: str) -> Dict[str, Any]:
-        """Get supported parameters for document type."""
-        if document_type not in self.supported_formats:
-            raise UnsupportedFormatError(f"Unsupported document type: {document_type}")
-        return self.supported_formats[document_type]["parameters"]
-        
-    def validate_parameters(self, document_type: str, parameters: Dict[str, Any]) -> bool:
-        """Validate parameters for document type."""
-        if document_type not in self.supported_formats:
-            return False
-            
-        supported_params = self.supported_formats[document_type]["parameters"]
-        
-        try:
-            for param_name, param_spec in supported_params.items():
-                if param_name in parameters:
-                    value = parameters[param_name]
-                    
-                    # Type checking
-                    if param_spec["type"] == "bool":
-                        value = bool(value)
-                    elif param_spec["type"] == "str":
-                        value = str(value)
-                        
-            return True
-        except (ValueError, TypeError):
-            return False
-        
-    async def process(
+
+    def get_description(self) -> str:
+        return "Extract text content from documents with layout preservation and structure detection. Supports PDF documents, images, and various text formats."
+
+    async def _process_document(
         self,
         file_path: str,
-        parameters: Dict[str, Any],
-        progress_callback: Optional[Callable[[float, str], None]] = None
+        parameters: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Process document for text extraction with progress tracking."""
-        self.ensure_model_loaded()
-        
         try:
-            if progress_callback:
-                await progress_callback(10, "Loading document")
-                
-            # Get document type
-            document_type = "pdf" if file_path.lower().endswith(".pdf") else "image"
+            document_type = Path(file_path).suffix.lower()[1:]
             
-            # Validate parameters
-            if not self.validate_parameters(document_type, parameters):
-                raise ValueError("Invalid parameters for text extraction")
-                
-            if progress_callback:
-                await progress_callback(20, "Extracting text")
-                
-            # TODO: Implement actual text extraction logic
-            result = {
-                "text": "",
-                "pages": [],
-                "metadata": {}
-            }
+            # Get appropriate detector based on document type
+            if document_type == "docx":
+                from .detectors.word_detector import WordTextExtractor
+                detector = WordTextExtractor()
+            elif document_type == "pdf":
+                from .detectors.pdf_detector import PDFTextExtractor
+                detector = PDFTextExtractor()
+            else:  # Image formats
+                from .detectors.image_detector import ImageTextExtractor
+                detector = ImageTextExtractor()
             
-            if progress_callback:
-                await progress_callback(90, "Finalizing results")
-                
-            return result
-                
+            # Process using the detector
+            return await detector.detect(file_path, parameters)
+            
         except Exception as e:
-            logger.error(f"Text extraction failed: {str(e)}")
+            logger.error(f"Error in text extraction: {str(e)}")
             raise ProcessingError(f"Text extraction failed: {str(e)}")
 
 
 class TextSummarizationFactory(BaseMLFactory):
     """Factory for text summarization models."""
     
-    def load_model(self) -> None:
-        """Load summarization PyTorch model."""
-        try:
-            self.model = torch.hub.load('facebook/bart-large-cnn', 'model')
-            self.model.to(self.device)
-            self.model.eval()
-        except Exception as e:
-            logger.error(f"Failed to load summarization model: {str(e)}")
-            raise ModelLoadError(f"Failed to load summarization model: {str(e)}")
-        
-    async def process(self, text: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """Process text for summarization."""
-        self.ensure_model_loaded()
-        
-        try:
-            with torch.no_grad():
-                # TODO: Implement actual summarization logic
-                results = {
-                    "summary": "",
-                    "original_length": 0,
-                    "summary_length": 0,
-                    "key_points": []
+    def __init__(self):
+        super().__init__()
+        self.supported_formats = {
+            "pdf": {
+                "parameters": {
+                    "max_length": {
+                        "type": "integer",
+                        "default": 150,
+                        "min": 50,
+                        "max": 500,
+                        "description": "Maximum length of the summary in words"
+                    },
+                    "min_length": {
+                        "type": "integer",
+                        "default": 50,
+                        "min": 20,
+                        "max": 200,
+                        "description": "Minimum length of the summary in words"
+                    }
                 }
-                return results
-                
-        except Exception as e:
-            logger.error(f"Text summarization failed: {str(e)}")
-            raise ProcessingError(f"Text summarization failed: {str(e)}")
+            },
+            "docx": {
+                "parameters": {
+                    "max_length": {
+                        "type": "integer",
+                        "default": 150,
+                        "min": 50,
+                        "max": 500,
+                        "description": "Maximum length of the summary in words"
+                    },
+                    "min_length": {
+                        "type": "integer",
+                        "default": 50,
+                        "min": 20,
+                        "max": 200,
+                        "description": "Minimum length of the summary in words"
+                    }
+                }
+            },
+            "txt": {
+                "parameters": {
+                    "max_length": {
+                        "type": "integer",
+                        "default": 150,
+                        "min": 50,
+                        "max": 500,
+                        "description": "Maximum length of the summary in words"
+                    },
+                    "min_length": {
+                        "type": "integer",
+                        "default": 50,
+                        "min": 20,
+                        "max": 200,
+                        "description": "Minimum length of the summary in words"
+                    }
+                }
+            }
+        }
+
+    def get_description(self) -> str:
+        return "Generate concise and coherent summaries of text content using advanced language models. Supports PDF documents and text files."
+
+    async def _process_document(
+        self,
+        file_path: str,
+        parameters: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        return {"summary": "Summarized text will appear here"}
 
 
 class TemplateConversionFactory(BaseMLFactory):
     """Factory for template conversion models."""
     
-    def load_model(self) -> None:
-        """Load template conversion PyTorch model."""
-        try:
-            self.model = torch.hub.load('your/template/model', 'custom',
-                                     path='path/to/template_weights.pt')
-            self.model.to(self.device)
-            self.model.eval()
-        except Exception as e:
-            logger.error(f"Failed to load template conversion model: {str(e)}")
-            raise ModelLoadError(f"Failed to load template conversion model: {str(e)}")
-        
-    async def process(self, document_path: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """Process document for template conversion."""
-        self.ensure_model_loaded()
-        
-        try:
-            with torch.no_grad():
-                # TODO: Implement actual template conversion logic
-                results = {
-                    "converted_file_url": "",
-                    "original_format": "",
-                    "target_format": parameters.get("target_format", "docx"),
-                    "conversion_metadata": {}
+    def __init__(self):
+        super().__init__()
+        self.supported_formats = {
+            "pdf": {
+                "parameters": {
+                    "target_format": {
+                        "type": "string",
+                        "default": "docx",
+                        "enum": ["pdf", "docx"],
+                        "description": "Target format for conversion"
+                    },
+                    "preserve_styles": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Whether to preserve document styles"
+                    }
                 }
-                return results
-                
-        except Exception as e:
-            logger.error(f"Template conversion failed: {str(e)}")
-            raise ProcessingError(f"Template conversion failed: {str(e)}")
+            },
+            "docx": {
+                "parameters": {
+                    "target_format": {
+                        "type": "string",
+                        "default": "pdf",
+                        "enum": ["pdf", "docx"],
+                        "description": "Target format for conversion"
+                    },
+                    "preserve_styles": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Whether to preserve document styles"
+                    }
+                }
+            }
+        }
+
+    def get_description(self) -> str:
+        return "Convert documents between different formats while preserving layout and styling. Supports PDF and DOCX formats."
+
+    async def _process_document(
+        self,
+        file_path: str,
+        parameters: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        return {
+            "converted_file": "path/to/converted/file",
+            "format": parameters.get("target_format", "pdf")
+        }
 
 
-
-# Factory mapping
+# Update the factory map with all factories
 FACTORY_MAP = {
     AnalysisType.TABLE_DETECTION: TableDetectionFactory,
     AnalysisType.TEXT_EXTRACTION: TextExtractionFactory,

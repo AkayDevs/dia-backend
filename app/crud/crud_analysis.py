@@ -1,9 +1,10 @@
 import logging
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 import uuid
 from datetime import datetime
+import json
 
 from app.crud.base import CRUDBase
 from app.db.models.analysis_result import AnalysisResult
@@ -18,6 +19,53 @@ from app.schemas.analysis import (
 logger = logging.getLogger(__name__)
 
 class CRUDAnalysisResult(CRUDBase[AnalysisResult, AnalysisResultCreate, AnalysisResultUpdate]):
+    def create(self, db: Session, *, obj_in: AnalysisResultCreate) -> AnalysisResult:
+        """Create a new analysis result."""
+        db_obj = AnalysisResult(
+            id=obj_in.id,
+            document_id=obj_in.document_id,
+            type=obj_in.type,
+            status=obj_in.status,
+            parameters=obj_in.parameters,
+            progress=obj_in.progress,
+            created_at=obj_in.created_at
+        )
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+    def update(self, db: Session, *, analysis_id: str, obj_in: Union[AnalysisResultUpdate, Dict[str, Any]]) -> AnalysisResult:
+        """Update an analysis result."""
+        db_obj = db.query(AnalysisResult).filter(AnalysisResult.id == analysis_id).first()
+        if not db_obj:
+            return None
+            
+        # Convert input to dictionary if it's a Pydantic model
+        update_data = obj_in if isinstance(obj_in, dict) else obj_in.model_dump(exclude_unset=True)
+            
+        for field, value in update_data.items():
+            setattr(db_obj, field, value)
+            
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+    def get_multi_by_filter(
+        self,
+        db: Session,
+        *,
+        filters: Dict[str, Any],
+        skip: int = 0,
+        limit: int = 100
+    ) -> List[AnalysisResult]:
+        """Get multiple analysis results with filters."""
+        query = db.query(AnalysisResult)
+        for field, value in filters.items():
+            query = query.filter(getattr(AnalysisResult, field) == value)
+        return query.offset(skip).limit(limit).all()
+
     def create_result(
         self, 
         db: Session, 

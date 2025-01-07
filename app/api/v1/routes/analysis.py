@@ -23,6 +23,62 @@ router = APIRouter()
 logger = logging.getLogger("app.api.analysis")
 
 
+@router.get("/types", response_model=List[dict])
+async def list_analysis_types(
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(get_current_active_verified_user)
+) -> Any:
+    """
+    List all available analysis types with their parameters.
+    Any logged-in user can access this endpoint.
+    """
+    logger.info(f"User {current_user.id} listing available analysis types")
+    
+    try:
+        # Create orchestrator to access factories
+        analysis_orchestrator = AnalysisOrchestrator(db)
+        
+        # Build response for each analysis type
+        analysis_types = []
+        for analysis_type in AnalysisType:
+            try:
+                # Get factory instance
+                factory = analysis_orchestrator._get_factory(analysis_type)
+                if not factory:
+                    continue
+                
+                # Get description and supported formats directly from factory
+                description = factory.get_description()
+                supported_formats = list(factory.supported_formats.keys())
+                
+                # Get parameters using the first supported format
+                if supported_formats:
+                    parameters = factory.get_supported_parameters(supported_formats[0])
+                else:
+                    continue
+                
+                analysis_types.append({
+                    "type": analysis_type,
+                    "name": analysis_type.value.replace("_", " ").title(),
+                    "description": description,
+                    "supported_formats": supported_formats,
+                    "parameters": parameters
+                })
+                
+            except Exception as e:
+                logger.warning(f"Error getting info for analysis type {analysis_type}: {str(e)}")
+                continue
+        
+        return analysis_types
+        
+    except Exception as e:
+        logger.error(f"Error listing analysis types: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error retrieving analysis types"
+        )
+
+
 @router.post("/batch", response_model=BatchAnalysisResponse)
 async def create_batch_analysis(
     *,
@@ -54,18 +110,18 @@ async def create_batch_analysis(
             # Get supported parameters for validation
             supported_params = analysis_orchestrator.get_supported_parameters(
                 doc_request.analysis_type,
-                document.file_type
+                document.type
             )
             
             # Validate parameters
             analysis_orchestrator.validate_parameters(
                 doc_request.analysis_type,
-                document.file_type,
+                document.type,
                 doc_request.parameters
             )
 
             # Create analysis task
-            analysis = analysis_orchestrator.start_analysis(
+            analysis = await analysis_orchestrator.start_analysis(
                 document_id=doc_request.document_id,
                 analysis_type=doc_request.analysis_type,
                 parameters=doc_request.parameters
@@ -143,18 +199,18 @@ async def create_analysis(
         # Get supported parameters for validation
         supported_params = analysis_orchestrator.get_supported_parameters(
             analysis_request.analysis_type,
-            document.file_type
+            document.type
         )
         
         # Validate parameters
         analysis_orchestrator.validate_parameters(
             analysis_request.analysis_type,
-            document.file_type,
+            document.type,
             analysis_request.parameters
         )
         
         # Create analysis task
-        analysis = analysis_orchestrator.start_analysis(
+        analysis = await analysis_orchestrator.start_analysis(
             document_id=document_id,
             analysis_type=analysis_request.analysis_type,
             parameters=analysis_request.parameters
@@ -299,7 +355,7 @@ async def get_analysis_parameters(
         analysis_orchestrator = AnalysisOrchestrator(db)
         return analysis_orchestrator.get_supported_parameters(
             analysis_type,
-            document.file_type
+            document.type
         )
     except ValueError as e:
         raise HTTPException(
@@ -312,177 +368,6 @@ async def get_analysis_parameters(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error retrieving parameters"
         )
-
-
-@router.get("/types", response_model=List[dict])
-async def list_analysis_types() -> Any:
-    """
-    List all available analysis types with their parameters.
-    """
-    logger.info("Listing available analysis types")
-    
-    return [
-        {
-            "type": AnalysisType.TABLE_DETECTION,
-            "name": "Table Detection",
-            "description": "Detect and extract tables from documents",
-            "supported_formats": ["pdf", "png", "jpg", "jpeg"],
-            "parameters": {
-                "confidence_threshold": {
-                    "type": "float",
-                    "default": 0.5,
-                    "min": 0.0,
-                    "max": 1.0,
-                    "description": "Minimum confidence score for table detection"
-                },
-                "min_row_count": {
-                    "type": "integer",
-                    "default": 2,
-                    "min": 1,
-                    "description": "Minimum number of rows to consider a valid table"
-                },
-                "detect_headers": {
-                    "type": "boolean",
-                    "default": True,
-                    "description": "Whether to detect table headers"
-                }
-            }
-        },
-        {
-            "type": AnalysisType.TEXT_EXTRACTION,
-            "name": "Text Extraction",
-            "description": "Extract text content from documents",
-            "supported_formats": ["pdf", "png", "jpg", "jpeg", "docx"],
-            "parameters": {
-                "confidence_threshold": {
-                    "type": "float",
-                    "default": 0.5,
-                    "min": 0.0,
-                    "max": 1.0,
-                    "description": "Minimum confidence score for text extraction"
-                },
-                "extract_layout": {
-                    "type": "boolean",
-                    "default": True,
-                    "description": "Whether to preserve document layout"
-                },
-                "detect_lists": {
-                    "type": "boolean",
-                    "default": True,
-                    "description": "Whether to detect and format lists"
-                }
-            }
-        },
-        {
-            "type": AnalysisType.TEXT_SUMMARIZATION,
-            "name": "Text Summarization",
-            "description": "Generate concise summaries of text content",
-            "supported_formats": ["pdf", "docx", "txt"],
-            "parameters": {
-                "max_length": {
-                    "type": "integer",
-                    "default": 150,
-                    "min": 50,
-                    "max": 500,
-                    "description": "Maximum length of the summary in words"
-                },
-                "min_length": {
-                    "type": "integer",
-                    "default": 50,
-                    "min": 20,
-                    "max": 200,
-                    "description": "Minimum length of the summary in words"
-                }
-            }
-        },
-        {
-            "type": AnalysisType.TEMPLATE_CONVERSION,
-            "name": "Template Conversion",
-            "description": "Convert documents to different formats",
-            "supported_formats": ["pdf", "docx"],
-            "parameters": {
-                "target_format": {
-                    "type": "string",
-                    "default": "docx",
-                    "enum": ["pdf", "docx"],
-                    "description": "Target format for conversion"
-                },
-                "preserve_styles": {
-                    "type": "boolean",
-                    "default": True,
-                    "description": "Whether to preserve document styles"
-                }
-            }
-        },
-        {
-            "type": AnalysisType.DOCUMENT_CLASSIFICATION,
-            "name": "Document Classification",
-            "description": "Classify documents into predefined categories",
-            "supported_formats": ["pdf", "docx", "txt"],
-            "parameters": {
-                "confidence_threshold": {
-                    "type": "float",
-                    "default": 0.7,
-                    "min": 0.0,
-                    "max": 1.0,
-                    "description": "Minimum confidence score for classification"
-                },
-                "include_metadata": {
-                    "type": "boolean",
-                    "default": True,
-                    "description": "Whether to include document metadata in classification"
-                }
-            }
-        },
-        {
-            "type": AnalysisType.ENTITY_EXTRACTION,
-            "name": "Entity Extraction",
-            "description": "Extract named entities from documents",
-            "supported_formats": ["pdf", "docx", "txt"],
-            "parameters": {
-                "confidence_threshold": {
-                    "type": "float",
-                    "default": 0.6,
-                    "min": 0.0,
-                    "max": 1.0,
-                    "description": "Minimum confidence score for entity extraction"
-                },
-                "entity_types": {
-                    "type": "array",
-                    "items": {
-                        "type": "string",
-                        "enum": ["person", "organization", "location", "date", "money"]
-                    },
-                    "default": ["person", "organization", "location"],
-                    "description": "Types of entities to extract"
-                },
-                "include_context": {
-                    "type": "boolean",
-                    "default": True,
-                    "description": "Whether to include surrounding context for entities"
-                }
-            }
-        },
-        {
-            "type": AnalysisType.DOCUMENT_COMPARISON,
-            "name": "Document Comparison",
-            "description": "Compare two documents for similarities and differences",
-            "supported_formats": ["pdf", "docx"],
-            "parameters": {
-                "comparison_type": {
-                    "type": "string",
-                    "default": "content",
-                    "enum": ["content", "structure", "visual"],
-                    "description": "Type of comparison to perform"
-                },
-                "include_visual_diff": {
-                    "type": "boolean",
-                    "default": True,
-                    "description": "Whether to include visual difference markers"
-                }
-            }
-        }
-    ]
 
 
 @router.delete("/{analysis_id}", status_code=status.HTTP_204_NO_CONTENT)

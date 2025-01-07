@@ -109,30 +109,16 @@ class AnalysisResult(AnalysisResultBase):
     id: str = Field(..., description="Result unique identifier")
     document_id: str = Field(..., description="ID of the analyzed document")
     status: AnalysisStatus = Field(..., description="Analysis status")
-    parameters: Dict[str, Any] = Field(..., description="Parameters used for analysis")
+    parameters: Dict[str, Any] = Field(default_factory=dict, description="Parameters used for analysis")
     error: Optional[str] = Field(None, description="Error message if analysis failed")
     created_at: datetime = Field(..., description="When analysis was started")
     completed_at: Optional[datetime] = Field(None, description="When analysis completed")
+    progress: float = Field(default=0.0, description="Analysis progress (0.0 to 1.0)")
 
     model_config = ConfigDict(
         from_attributes=True,
-        json_schema_extra={
-            "example": {
-                "id": "550e8400-e29b-41d4-a716-446655440000",
-                "document_id": "123e4567-e89b-12d3-a456-426614174000",
-                "type": "text_extraction",
-                "status": "completed",
-                "parameters": {
-                    "confidence_threshold": 0.7,
-                    "extract_layout": True
-                },
-                "result": {
-                    "text": "Extracted content",
-                    "pages": 5
-                },
-                "created_at": "2024-01-06T12:00:00Z",
-                "completed_at": "2024-01-06T12:01:00Z"
-            }
+        json_encoders={
+            datetime: lambda v: v.isoformat()
         }
     )
 
@@ -323,20 +309,20 @@ class TemplateConversionResult(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-class AnalysisResultCreate(AnalysisResultBase):
+class AnalysisResultCreate(BaseModel):
     """Schema for creating a new analysis result."""
-    document_id: str = Field(..., description="ID of the analyzed document")
-
+    id: str
+    document_id: str
+    type: AnalysisType
+    status: AnalysisStatus
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+    progress: float = Field(default=0.0)
+    created_at: datetime
+    
     model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "type": "text_extraction",
-                "document_id": "550e8400-e29b-41d4-a716-446655440000",
-                "result": {
-                    "text": "Extracted content",
-                    "pages": 5
-                }
-            }
+        from_attributes=True,
+        json_encoders={
+            datetime: lambda v: v.isoformat()
         }
     )
 
