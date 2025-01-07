@@ -17,7 +17,7 @@ from app.schemas.analysis import (
     BatchAnalysisResponse,
     BatchAnalysisError
 )
-from app.services.analysis import AnalysisService, DocumentNotFoundError
+from app.services.analysis import AnalysisOrchestrator, DocumentNotFoundError
 
 router = APIRouter()
 logger = logging.getLogger("app.api.analysis")
@@ -33,22 +33,10 @@ async def create_batch_analysis(
 ) -> Any:
     """
     Create multiple analysis tasks for multiple documents.
-    
-    Args:
-        batch_request: Batch analysis request containing document IDs and analysis parameters
-        background_tasks: Background tasks runner
-        db: Database session
-        current_user: Currently authenticated user
-        
-    Returns:
-        Batch analysis response with created analysis tasks
-        
-    Raises:
-        HTTPException: If any document is not found or validation fails
     """
     logger.info(f"Creating batch analysis for {len(batch_request.documents)} documents")
     
-    analysis_service = AnalysisService(db)
+    analysis_orchestrator = AnalysisOrchestrator(db)
     results = []
     errors = []
 
@@ -63,8 +51,21 @@ async def create_batch_analysis(
             if not document:
                 raise DocumentNotFoundError(f"Document not found: {doc_request.document_id}")
 
+            # Get supported parameters for validation
+            supported_params = analysis_orchestrator.get_supported_parameters(
+                doc_request.analysis_type,
+                document.file_type
+            )
+            
+            # Validate parameters
+            analysis_orchestrator.validate_parameters(
+                doc_request.analysis_type,
+                document.file_type,
+                doc_request.parameters
+            )
+
             # Create analysis task
-            analysis = analysis_service.create_analysis(
+            analysis = analysis_orchestrator.start_analysis(
                 document_id=doc_request.document_id,
                 analysis_type=doc_request.analysis_type,
                 parameters=doc_request.parameters
@@ -72,7 +73,7 @@ async def create_batch_analysis(
             
             # Schedule processing
             background_tasks.add_task(
-                analysis_service.process_analysis,
+                analysis_orchestrator.process_analysis,
                 analysis.id
             )
             
@@ -82,6 +83,11 @@ async def create_batch_analysis(
             errors.append(BatchAnalysisError(
                 document_id=doc_request.document_id,
                 error=str(e)
+            ))
+        except ValueError as e:
+            errors.append(BatchAnalysisError(
+                document_id=doc_request.document_id,
+                error=f"Parameter validation failed: {str(e)}"
             ))
         except Exception as e:
             logger.error(f"Error processing document {doc_request.document_id}: {str(e)}")
@@ -115,19 +121,6 @@ async def create_analysis(
 ) -> Any:
     """
     Create a new analysis task for a document.
-    
-    Args:
-        document_id: Document ID
-        analysis_request: Analysis request parameters
-        background_tasks: Background tasks runner
-        db: Database session
-        current_user: Currently authenticated user
-        
-    Returns:
-        Created analysis task
-        
-    Raises:
-        HTTPException: If document is not found or validation fails
     """
     logger.info(f"Creating analysis - Document: {document_id}, Type: {analysis_request.analysis_type}")
     
@@ -144,11 +137,24 @@ async def create_analysis(
         )
     
     try:
-        # Create analysis service
-        analysis_service = AnalysisService(db)
+        # Create analysis orchestrator
+        analysis_orchestrator = AnalysisOrchestrator(db)
+        
+        # Get supported parameters for validation
+        supported_params = analysis_orchestrator.get_supported_parameters(
+            analysis_request.analysis_type,
+            document.file_type
+        )
+        
+        # Validate parameters
+        analysis_orchestrator.validate_parameters(
+            analysis_request.analysis_type,
+            document.file_type,
+            analysis_request.parameters
+        )
         
         # Create analysis task
-        analysis = analysis_service.create_analysis(
+        analysis = analysis_orchestrator.start_analysis(
             document_id=document_id,
             analysis_type=analysis_request.analysis_type,
             parameters=analysis_request.parameters
@@ -156,7 +162,7 @@ async def create_analysis(
         
         # Schedule processing
         background_tasks.add_task(
-            analysis_service.process_analysis,
+            analysis_orchestrator.process_analysis,
             analysis.id
         )
         
@@ -188,21 +194,6 @@ async def list_document_analyses(
 ) -> Any:
     """
     List all analyses for a document with optional filtering.
-    
-    Args:
-        document_id: Document ID
-        analysis_type: Filter by analysis type
-        status: Filter by analysis status
-        skip: Number of records to skip
-        limit: Maximum number of records to return
-        db: Database session
-        current_user: Currently authenticated user
-        
-    Returns:
-        List of analysis results
-        
-    Raises:
-        HTTPException: If document is not found
     """
     logger.info(f"Listing analyses for document: {document_id}")
     
@@ -220,8 +211,8 @@ async def list_document_analyses(
     
     try:
         # Get analyses with filters
-        analysis_service = AnalysisService(db)
-        return analysis_service.get_document_analyses(
+        analysis_orchestrator = AnalysisOrchestrator(db)
+        return analysis_orchestrator.get_document_analyses(
             document_id=document_id,
             analysis_type=analysis_type,
             status=status,
@@ -244,23 +235,12 @@ async def get_analysis(
 ) -> Any:
     """
     Get a specific analysis result.
-    
-    Args:
-        analysis_id: Analysis ID
-        db: Database session
-        current_user: Currently authenticated user
-        
-    Returns:
-        Analysis result
-        
-    Raises:
-        HTTPException: If analysis is not found or user doesn't have access
     """
     logger.info(f"Fetching analysis: {analysis_id}")
     
     try:
-        analysis_service = AnalysisService(db)
-        analysis = analysis_service.get_analysis(analysis_id)
+        analysis_orchestrator = AnalysisOrchestrator(db)
+        analysis = analysis_orchestrator.get_analysis(analysis_id)
         
         if not analysis:
             raise HTTPException(
@@ -291,13 +271,53 @@ async def get_analysis(
         )
 
 
+@router.get("/parameters/{document_id}/{analysis_type}", response_model=dict)
+async def get_analysis_parameters(
+    document_id: str,
+    analysis_type: AnalysisType,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(get_current_active_verified_user),
+) -> Any:
+    """
+    Get supported parameters for a specific analysis type and document.
+    """
+    logger.info(f"Getting parameters for {analysis_type} on document: {document_id}")
+    
+    # Verify document ownership
+    document = db.query(Document).filter(
+        Document.id == document_id,
+        Document.user_id == current_user.id
+    ).first()
+    
+    if not document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found"
+        )
+    
+    try:
+        analysis_orchestrator = AnalysisOrchestrator(db)
+        return analysis_orchestrator.get_supported_parameters(
+            analysis_type,
+            document.file_type
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Error getting parameters: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error retrieving parameters"
+        )
+
+
 @router.get("/types", response_model=List[dict])
 async def list_analysis_types() -> Any:
     """
     List all available analysis types with their parameters.
-    
-    Returns:
-        List of analysis types with their configurations
     """
     logger.info("Listing available analysis types")
     
@@ -462,4 +482,49 @@ async def list_analysis_types() -> Any:
                 }
             }
         }
-    ] 
+    ]
+
+
+@router.delete("/{analysis_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_analysis(
+    analysis_id: str,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(get_current_active_verified_user),
+) -> None:
+    """
+    Delete a specific analysis result.
+    """
+    logger.info(f"Deleting analysis: {analysis_id}")
+    
+    try:
+        analysis_orchestrator = AnalysisOrchestrator(db)
+        analysis = analysis_orchestrator.get_analysis(analysis_id)
+        
+        if not analysis:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Analysis not found"
+            )
+        
+        # Verify document ownership
+        document = db.query(Document).filter(
+            Document.id == analysis.document_id,
+            Document.user_id == current_user.id
+        ).first()
+        
+        if not document:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Analysis not found"
+            )
+        
+        analysis_orchestrator.delete_analysis(analysis_id)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting analysis: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error deleting analysis result"
+        ) 

@@ -31,6 +31,22 @@ from app.services.ml.factory import (
 
 logger = logging.getLogger(__name__)
 
+class DocumentNotFoundError(Exception):
+    """Exception raised when a document is not found."""
+    pass
+
+class AnalysisError(Exception):
+    """Base exception for analysis-related errors."""
+    pass
+
+class ParameterValidationError(AnalysisError):
+    """Exception raised when analysis parameters are invalid."""
+    pass
+
+class UnsupportedAnalysisError(AnalysisError):
+    """Exception raised when analysis type is not supported for document type."""
+    pass
+
 class AnalysisOrchestrator:
     """Orchestrates the complete analysis workflow."""
     
