@@ -283,13 +283,105 @@ class BatchAnalysisResponse(BaseModel):
 
 
 # Type-specific result schemas
+class BoundingBox(BaseModel):
+    """Schema for bounding box coordinates."""
+    x1: float = Field(..., description="Left coordinate")
+    y1: float = Field(..., description="Top coordinate")
+    x2: float = Field(..., description="Right coordinate")
+    y2: float = Field(..., description="Bottom coordinate")
+    
+    @validator('x2')
+    def validate_x2(cls, v, values):
+        if 'x1' in values and v < values['x1']:
+            raise ValueError("x2 must be greater than x1")
+        return v
+        
+    @validator('y2')
+    def validate_y2(cls, v, values):
+        if 'y1' in values and v < values['y1']:
+            raise ValueError("y2 must be greater than y1")
+        return v
+
+class TableCell(BaseModel):
+    """Schema for a single table cell."""
+    content: str = Field(..., description="Cell content")
+    row_index: int = Field(..., ge=0, description="Row index (0-based)")
+    col_index: int = Field(..., ge=0, description="Column index (0-based)")
+    row_span: int = Field(default=1, ge=1, description="Number of rows this cell spans")
+    col_span: int = Field(default=1, ge=1, description="Number of columns this cell spans")
+    is_header: bool = Field(default=False, description="Whether this cell is a header")
+    confidence: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Confidence score for cell content"
+    )
+
+class DetectedTable(BaseModel):
+    """Schema for a single detected table."""
+    bbox: BoundingBox = Field(..., description="Table bounding box coordinates")
+    confidence_score: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Confidence score for table detection"
+    )
+    rows: int = Field(..., ge=1, description="Number of rows")
+    columns: int = Field(..., ge=1, description="Number of columns")
+    cells: List[TableCell] = Field(..., description="List of cells in the table")
+    has_headers: bool = Field(default=False, description="Whether table has header row(s)")
+    header_rows: List[int] = Field(
+        default_factory=list,
+        description="Indices of header rows (0-based)"
+    )
+
+class PageTableInfo(BaseModel):
+    """Schema for tables detected on a single page."""
+    page_number: int = Field(..., ge=1, description="Page number (1-based)")
+    page_dimensions: Optional[Dict[str, float]] = Field(
+        None,
+        description="Page dimensions (width, height) if available"
+    )
+    tables: List[DetectedTable] = Field(
+        default_factory=list,
+        description="List of tables detected on this page"
+    )
+
 class TableDetectionResult(BaseModel):
     """Result schema for table detection."""
-    tables: List[Dict[str, Any]] = Field(..., description="Detected tables")
-    page_numbers: List[int] = Field(..., description="Pages containing tables")
-    confidence_scores: List[float] = Field(..., description="Detection confidence scores")
+    pages: List[PageTableInfo] = Field(
+        ...,
+        description="Page-wise table detection results"
+    )
+    total_tables: int = Field(
+        ...,
+        ge=0,
+        description="Total number of tables detected"
+    )
+    average_confidence: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Average confidence score across all detections"
+    )
+    processing_metadata: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional processing metadata"
+    )
 
-    model_config = ConfigDict(extra="allow")
+    @validator('average_confidence')
+    def validate_average_confidence(cls, v):
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("Average confidence must be between 0.0 and 1.0")
+        return v
+
+    @validator('total_tables')
+    def validate_total_tables(cls, v, values):
+        if 'pages' in values:
+            total = sum(len(page.tables) for page in values['pages'])
+            if total != v:
+                raise ValueError("Total tables count doesn't match sum of tables in pages")
+        return v
 
 
 class TextExtractionResult(BaseModel):
