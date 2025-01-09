@@ -4,6 +4,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
+from app.core.logging_conf import setup_logging
 from app.api.v1.routes import auth, health, documents, users, analysis
 from app.core.admin import setup_admin
 from app.db.session import engine, SessionLocal
@@ -16,15 +17,11 @@ import uvicorn
 import os
 import logging
 
+
+setup_logging()
+
 # Get the root logger
-logger = logging.getLogger()
-
-# Remove any existing handlers
-for handler in logger.handlers[:]:
-    logger.removeHandler(handler)
-
-# Let uvicorn handle the logging configuration
-# This ensures logging respects the --log-level argument
+logger = logging.getLogger(__name__)
 
 # Initialize rate limiter
 limiter = Limiter(key_func=get_remote_address)

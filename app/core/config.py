@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Document Intelligence Analysis"
     VERSION: str = "1.0.0"
     DESCRIPTION: str = "API for Document Intelligence Analysis"
+    ENVIRONMENT: str = "development"
+    DEBUG: bool = True
     
     # Security
     SECRET_KEY: str = Field(default_factory=lambda: secrets.token_urlsafe(32))

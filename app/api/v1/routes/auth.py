@@ -11,10 +11,21 @@ from app.db import deps
 from app.schemas.user import User, UserCreate
 from app.schemas.token import Token, TokenPayload
 import logging
+import uuid
 
 router = APIRouter()
+
 logger = logging.getLogger(__name__)
 
+def get_request_info(request: Request) -> dict:
+    """Extract common request information for logging."""
+    return {
+        "request_id": str(uuid.uuid4()),
+        "ip_address": request.client.host,
+        "user_agent": request.headers.get("user-agent"),
+        "path": request.url.path,
+        "method": request.method
+    }
 
 @router.post("/register", response_model=User, status_code=status.HTTP_201_CREATED)
 async def register(
@@ -22,48 +33,47 @@ async def register(
     db: Session = Depends(deps.get_db),
     user_in: UserCreate = Body(...),
 ) -> Any:
-    """
-    Register new user.
-    
-    Args:
-        request: FastAPI request object
-        db: Database session
-        user_in: User creation data
-        
-    Returns:
-        Newly created user object
-        
-    Raises:
-        HTTPException: If email is already registered or passwords don't match
-    """
-    logger.info(f"Registration attempt for email: {user_in.email}")
+    """Register new user."""
+    req_info = get_request_info(request)
+    logger.info("Registration attempt initiated", extra={
+        **req_info,
+        "email": user_in.email,
+        "event": "REGISTRATION_ATTEMPT"
+    })
     
     # Check if email exists
     user = crud_user.get_by_email(db, email=user_in.email)
     if user:
-        logger.warning(f"Registration failed: Email already exists: {user_in.email}")
+        logger.warning("Registration failed - Email exists", extra={
+            **req_info,
+            "email": user_in.email,
+            "event": "REGISTRATION_DUPLICATE_EMAIL"
+        })
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered",
         )
     
     try:
-        # Create new user
         user = crud_user.create(db, obj_in=user_in)
-        logger.info(f"User registered successfully: {user.id}")
-        
-        # TODO: Send verification email
-        # verification_token = security.create_email_verification_token(user.email)
-        # send_verification_email(user.email, verification_token)
-        
+        logger.info("User registered successfully", extra={
+            **req_info,
+            "user_id": str(user.id),
+            "email": user_in.email,
+            "event": "REGISTRATION_SUCCESS"
+        })
         return user
     except Exception as e:
-        logger.error(f"Registration error: {str(e)}")
+        logger.error("Registration error", extra={
+            **req_info,
+            "email": user_in.email,
+            "error": str(e),
+            "event": "REGISTRATION_ERROR"
+        })
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error creating user account",
         )
-
 
 @router.post("/login", response_model=Token)
 async def login(
@@ -71,26 +81,21 @@ async def login(
     db: Session = Depends(deps.get_db),
     form_data: OAuth2PasswordRequestForm = Depends(),
 ) -> Any:
-    """
-    OAuth2 compatible token login.
-    
-    Args:
-        request: FastAPI request object
-        db: Database session
-        form_data: OAuth2 form containing username (email) and password
-        
-    Returns:
-        Access token and token type
-        
-    Raises:
-        HTTPException: If authentication fails or user is inactive
-    """
-    logger.info(f"Login attempt for user: {form_data.username}")
+    """OAuth2 compatible token login."""
+    req_info = get_request_info(request)
+    logger.info("Login attempt", extra={
+        **req_info,
+        "username": form_data.username,
+        "event": "LOGIN_ATTEMPT"
+    })
     
     # Check rate limiting
-    client_ip = request.client.host
-    if not deps.rate_limiter.is_allowed(f"login:{client_ip}"):
-        logger.warning(f"Login rate limit exceeded for IP: {client_ip}")
+    if not deps.rate_limiter.is_allowed(f"login:{req_info['ip_address']}"):
+        logger.warning("Login rate limit exceeded", extra={
+            **req_info,
+            "username": form_data.username,
+            "event": "LOGIN_RATE_LIMIT_EXCEEDED"
+        })
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many login attempts. Please try again later.",
@@ -103,14 +108,23 @@ async def login(
     )
     
     if not user:
-        logger.warning(f"Failed login attempt for user: {form_data.username}")
+        logger.warning("Failed login attempt - Invalid credentials", extra={
+            **req_info,
+            "username": form_data.username,
+            "event": "LOGIN_FAILED"
+        })
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
         )
     
     if not crud_user.is_active(user):
-        logger.warning(f"Login attempt for inactive user: {user.id}")
+        logger.warning("Login attempt for inactive account", extra={
+            **req_info,
+            "user_id": str(user.id),
+            "username": form_data.username,
+            "event": "LOGIN_INACTIVE_ACCOUNT"
+        })
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Account is inactive. Please contact support.",
@@ -132,7 +146,14 @@ async def login(
         # Update last login timestamp
         crud_user.update_last_login(db, user=user)
         
-        logger.info(f"User logged in successfully: {user.id}")
+        logger.info("Login successful", extra={
+            **req_info,
+            "user_id": str(user.id),
+            "username": form_data.username,
+            "event": "LOGIN_SUCCESS",
+            "access_token_expires": access_token_expires.total_seconds(),
+            "refresh_token_expires": refresh_token_expires.total_seconds()
+        })
         
         return {
             "access_token": access_token,
@@ -140,12 +161,17 @@ async def login(
             "token_type": "bearer",
         }
     except Exception as e:
-        logger.error(f"Login error: {str(e)}")
+        logger.error("Login processing error", extra={
+            **req_info,
+            "user_id": str(user.id),
+            "username": form_data.username,
+            "error": str(e),
+            "event": "LOGIN_ERROR"
+        })
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing login request",
         )
-
 
 @router.post("/refresh-token", response_model=Token)
 async def refresh_token(
@@ -153,34 +179,29 @@ async def refresh_token(
     db: Session = Depends(deps.get_db),
     refresh_token: str = Body(..., embed=True),
 ) -> Any:
-    """
-    Refresh access token using refresh token.
+    """Refresh access token using refresh token."""
+    req_info = get_request_info(request)
+    logger.info("Token refresh attempt", extra={
+        **req_info,
+        "event": "TOKEN_REFRESH_ATTEMPT"
+    })
     
-    Args:
-        request: FastAPI request object
-        db: Database session
-        refresh_token: Valid refresh token
-        
-    Returns:
-        New access token and refresh token
-        
-    Raises:
-        HTTPException: If refresh token is invalid or expired
-    """
     try:
-        # Verify refresh token
         payload = security.decode_token(refresh_token)
         token_data = TokenPayload(**payload)
-        
-        # Get user
         user = crud_user.get(db, id=token_data.sub)
+        
         if not user or not user.is_active:
+            logger.warning("Invalid refresh token attempt", extra={
+                **req_info,
+                "token_sub": token_data.sub,
+                "event": "TOKEN_REFRESH_INVALID"
+            })
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid refresh token",
             )
         
-        # Create new tokens
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = security.create_access_token(
             user.id, expires_delta=access_token_expires
@@ -191,7 +212,13 @@ async def refresh_token(
             user.id, expires_delta=refresh_token_expires
         )
         
-        logger.info(f"Tokens refreshed for user: {user.id}")
+        logger.info("Token refresh successful", extra={
+            **req_info,
+            "user_id": str(user.id),
+            "event": "TOKEN_REFRESH_SUCCESS",
+            "access_token_expires": access_token_expires.total_seconds(),
+            "refresh_token_expires": refresh_token_expires.total_seconds()
+        })
         
         return {
             "access_token": access_token,
@@ -199,12 +226,15 @@ async def refresh_token(
             "token_type": "bearer",
         }
     except Exception as e:
-        logger.error(f"Token refresh error: {str(e)}")
+        logger.error("Token refresh error", extra={
+            **req_info,
+            "error": str(e),
+            "event": "TOKEN_REFRESH_ERROR"
+        })
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid refresh token",
         )
-
 
 @router.post("/password-recovery/{email}")
 async def recover_password(
@@ -212,26 +242,20 @@ async def recover_password(
     email: str,
     db: Session = Depends(deps.get_db)
 ) -> Any:
-    """
-    Password Recovery.
+    """Password Recovery."""
+    req_info = get_request_info(request)
+    logger.info("Password recovery initiated", extra={
+        **req_info,
+        "email": email,
+        "event": "PASSWORD_RECOVERY_ATTEMPT"
+    })
     
-    Args:
-        request: FastAPI request object
-        email: User's email address
-        db: Database session
-        
-    Returns:
-        Success message
-        
-    Note:
-        Always returns success message even if email doesn't exist (security best practice)
-    """
-    logger.info(f"Password recovery requested for email: {email}")
-    
-    # Check rate limiting
-    client_ip = request.client.host
-    if not deps.rate_limiter.is_allowed(f"password_recovery:{client_ip}"):
-        logger.warning(f"Password recovery rate limit exceeded for IP: {client_ip}")
+    if not deps.rate_limiter.is_allowed(f"password_recovery:{req_info['ip_address']}"):
+        logger.warning("Password recovery rate limit exceeded", extra={
+            **req_info,
+            "email": email,
+            "event": "PASSWORD_RECOVERY_RATE_LIMIT"
+        })
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many requests. Please try again later.",
@@ -244,22 +268,27 @@ async def recover_password(
             token = security.create_password_reset_token(email)
             expires = datetime.utcnow() + timedelta(hours=settings.EMAIL_RESET_TOKEN_EXPIRE_HOURS)
             
-            # Update user with reset token
             crud_user.update(db, db_obj=user, obj_in={
                 "password_reset_token": token,
                 "password_reset_expires": expires
             })
             
-            # TODO: Send password reset email
-            # send_password_reset_email(email, token)
-            
-            logger.info(f"Password reset token created for user: {user.id}")
+            logger.info("Password reset token created", extra={
+                **req_info,
+                "user_id": str(user.id),
+                "email": email,
+                "token_expires": expires.isoformat(),
+                "event": "PASSWORD_RECOVERY_TOKEN_CREATED"
+            })
     except Exception as e:
-        logger.error(f"Password recovery error: {str(e)}")
+        logger.error("Password recovery error", extra={
+            **req_info,
+            "email": email,
+            "error": str(e),
+            "event": "PASSWORD_RECOVERY_ERROR"
+        })
     
-    # Always return success (prevents email enumeration)
     return {"msg": "If this email is registered, you will receive password reset instructions."}
-
 
 @router.post("/reset-password")
 async def reset_password(
@@ -268,72 +297,86 @@ async def reset_password(
     new_password: str = Body(...),
     db: Session = Depends(deps.get_db),
 ) -> Any:
-    """
-    Reset password using reset token.
+    """Reset password using reset token."""
+    req_info = get_request_info(request)
+    logger.info("Password reset attempt", extra={
+        **req_info,
+        "event": "PASSWORD_RESET_ATTEMPT"
+    })
     
-    Args:
-        request: FastAPI request object
-        token: Password reset token
-        new_password: New password
-        db: Database session
-        
-    Returns:
-        Success message
-        
-    Raises:
-        HTTPException: If token is invalid or expired
-    """
     try:
-        # Verify token and get email
         email = security.verify_password_reset_token(token)
         if not email:
+            logger.warning("Invalid password reset token", extra={
+                **req_info,
+                "event": "PASSWORD_RESET_INVALID_TOKEN"
+            })
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid or expired reset token",
             )
         
-        # Get user and verify token expiration
         user = crud_user.get_by_email(db, email=email)
         if not user or not user.is_active:
+            logger.warning("Password reset attempt for invalid user", extra={
+                **req_info,
+                "email": email,
+                "event": "PASSWORD_RESET_INVALID_USER"
+            })
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid reset token",
             )
         
         if not user.password_reset_token or user.password_reset_token != token:
+            logger.warning("Password reset token mismatch", extra={
+                **req_info,
+                "user_id": str(user.id),
+                "event": "PASSWORD_RESET_TOKEN_MISMATCH"
+            })
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid reset token",
             )
         
         if user.password_reset_expires and user.password_reset_expires < datetime.utcnow():
+            logger.warning("Expired password reset token", extra={
+                **req_info,
+                "user_id": str(user.id),
+                "event": "PASSWORD_RESET_TOKEN_EXPIRED"
+            })
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Reset token has expired",
             )
         
-        # Update password and clear reset token
         crud_user.set_password(db, user=user, password=new_password)
         crud_user.update(db, db_obj=user, obj_in={
             "password_reset_token": None,
             "password_reset_expires": None
         })
         
-        # Invalidate all existing tokens
         crud_token.blacklist_all_user_tokens(db, user.id)
         
-        logger.info(f"Password reset successful for user: {user.id}")
+        logger.info("Password reset successful", extra={
+            **req_info,
+            "user_id": str(user.id),
+            "event": "PASSWORD_RESET_SUCCESS"
+        })
         
         return {"msg": "Password updated successfully"}
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Password reset error: {str(e)}")
+        logger.error("Password reset error", extra={
+            **req_info,
+            "error": str(e),
+            "event": "PASSWORD_RESET_ERROR"
+        })
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing password reset",
         )
-
 
 @router.post("/verify/{token}")
 async def verify_email(
@@ -341,46 +384,54 @@ async def verify_email(
     token: str,
     db: Session = Depends(deps.get_db),
 ) -> Any:
-    """
-    Verify email address.
+    """Verify email address."""
+    req_info = get_request_info(request)
+    logger.info("Email verification attempt", extra={
+        **req_info,
+        "token": token[:8] + "...",  # Log only first 8 chars of token
+        "event": "EMAIL_VERIFICATION_ATTEMPT"
+    })
     
-    Args:
-        request: FastAPI request object
-        token: Email verification token
-        db: Database session
-        
-    Returns:
-        Success message
-        
-    Raises:
-        HTTPException: If token is invalid
-    """
     try:
-        # Verify token
         user = crud_user.get_by_field(db, "verification_token", token)
         if not user:
+            logger.warning("Invalid email verification token", extra={
+                **req_info,
+                "event": "EMAIL_VERIFICATION_INVALID_TOKEN"
+            })
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid verification token",
             )
         
         if crud_user.is_verified(user):
+            logger.info("Email already verified", extra={
+                **req_info,
+                "user_id": str(user.id),
+                "event": "EMAIL_VERIFICATION_ALREADY_VERIFIED"
+            })
             return {"msg": "Email already verified"}
         
-        # Mark email as verified
         crud_user.mark_verified(db, user=user)
-        logger.info(f"Email verified for user: {user.id}")
+        logger.info("Email verification successful", extra={
+            **req_info,
+            "user_id": str(user.id),
+            "event": "EMAIL_VERIFICATION_SUCCESS"
+        })
         
         return {"msg": "Email verified successfully"}
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Email verification error: {str(e)}")
+        logger.error("Email verification error", extra={
+            **req_info,
+            "error": str(e),
+            "event": "EMAIL_VERIFICATION_ERROR"
+        })
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing email verification",
         )
-
 
 @router.post("/logout")
 async def logout(
@@ -389,45 +440,48 @@ async def logout(
     current_user: User = Depends(deps.get_current_user),
     authorization: str = Header(...),
 ) -> Any:
-    """
-    Logout user by invalidating their JWT token.
+    """Logout user by invalidating their JWT token."""
+    req_info = get_request_info(request)
+    logger.info("Logout attempt", extra={
+        **req_info,
+        "user_id": str(current_user.id),
+        "event": "LOGOUT_ATTEMPT"
+    })
     
-    Args:
-        request: FastAPI request object
-        db: Database session
-        current_user: Currently authenticated user
-        authorization: Authorization header containing the token
-        
-    Returns:
-        Success message
-        
-    Raises:
-        HTTPException: If token is invalid or error occurs during logout
-    """
     try:
-        # Extract token from Authorization header
         if not authorization.startswith("Bearer "):
+            logger.warning("Invalid authorization header", extra={
+                **req_info,
+                "user_id": str(current_user.id),
+                "event": "LOGOUT_INVALID_HEADER"
+            })
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid authorization header",
             )
-        token = authorization.split(" ")[1]
         
-        # Decode token to get expiry
+        token = authorization.split(" ")[1]
         payload = security.decode_token(token)
         expires_at = datetime.fromtimestamp(payload.get("exp"))
         
-        # Blacklist the token
         crud_token.blacklist_token(db, token, expires_at)
-        
-        # Cleanup expired tokens (maintenance)
         crud_token.cleanup_expired_tokens(db)
         
-        logger.info(f"User logged out successfully: {current_user.id}")
+        logger.info("Logout successful", extra={
+            **req_info,
+            "user_id": str(current_user.id),
+            "token_expires": expires_at.isoformat(),
+            "event": "LOGOUT_SUCCESS"
+        })
         
         return {"msg": "Successfully logged out"}
     except Exception as e:
-        logger.error(f"Logout error for user {current_user.id}: {str(e)}")
+        logger.error("Logout error", extra={
+            **req_info,
+            "user_id": str(current_user.id),
+            "error": str(e),
+            "event": "LOGOUT_ERROR"
+        })
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Error processing logout request",
