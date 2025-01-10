@@ -1,6 +1,6 @@
 """update_analysis_result_model
 
-Revision ID: 8fcf32916c7e
+Revision ID: 20250107_0114
 Revises: 
 Create Date: 2025-01-07 01:14:31.734008+00:00
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '8fcf32916c7e'
+revision: str = '20250107_0114'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

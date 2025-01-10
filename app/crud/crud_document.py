@@ -7,8 +7,9 @@ from datetime import datetime
 
 from app.crud.base import CRUDBase
 from app.db.models.document import Document
+from app.db.models.tag import Tag
 from app.schemas.document import DocumentCreate, DocumentUpdate, DocumentType
-from app.schemas.analysis import AnalysisStatus
+from app.crud.crud_tag import tag as crud_tag
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +30,13 @@ class CRUDDocument(CRUDBase[Document, DocumentCreate, DocumentUpdate]):
                 size=obj_in.size,
                 url=obj_in.url,
                 user_id=user_id,
-                uploaded_at=datetime.utcnow(),
-                status=AnalysisStatus.PENDING
+                uploaded_at=datetime.utcnow()
             )
+            
+            # Add default tag
+            default_tag = crud_tag.get_default_tag(db)
+            db_obj.tags = [default_tag]
+            
             db.add(db_obj)
             db.commit()
             db.refresh(db_obj)
@@ -48,15 +53,11 @@ class CRUDDocument(CRUDBase[Document, DocumentCreate, DocumentUpdate]):
         user_id: str,
         skip: int = 0,
         limit: int = 100,
-        status: Optional[AnalysisStatus] = None,
         doc_type: Optional[DocumentType] = None
     ) -> List[Document]:
-        """Get all documents for a user with status and type filtering."""
+        """Get all documents for a user with type filtering."""
         try:
             query = db.query(self.model).filter(Document.user_id == user_id)
-            
-            if status:
-                query = query.filter(Document.status == status)
             
             if doc_type:
                 query = query.filter(Document.type == doc_type)
@@ -92,35 +93,6 @@ class CRUDDocument(CRUDBase[Document, DocumentCreate, DocumentUpdate]):
             logger.error(f"Error fetching document with results: {str(e)}")
             raise
 
-    def update_status(
-        self, 
-        db: Session, 
-        *, 
-        document_id: str, 
-        status: AnalysisStatus,
-        error_message: Optional[str] = None
-    ) -> Optional[Document]:
-        """Update document status with error handling."""
-        try:
-            document = db.query(self.model).filter(Document.id == document_id).first()
-            if not document:
-                logger.warning(f"Document not found: {document_id}")
-                return None
-
-            document.status = status
-            if error_message:
-                document.error_message = error_message
-            document.updated_at = datetime.utcnow()
-            
-            db.add(document)
-            db.commit()
-            db.refresh(document)
-            return document
-        except Exception as e:
-            db.rollback()
-            logger.error(f"Error updating document status: {str(e)}")
-            raise
-
     def get_by_type(
         self,
         db: Session,
@@ -141,6 +113,64 @@ class CRUDDocument(CRUDBase[Document, DocumentCreate, DocumentUpdate]):
             )
         except Exception as e:
             logger.error(f"Error fetching documents by type: {str(e)}")
+            raise
+
+    def update_with_tags(
+        self,
+        db: Session,
+        *,
+        db_obj: Document,
+        obj_in: DocumentUpdate
+    ) -> Document:
+        """Update document with tags."""
+        try:
+            # Update basic fields
+            update_data = obj_in.model_dump(exclude_unset=True)
+            tag_ids = update_data.pop('tag_ids', None)
+            
+            # Update document fields
+            for field in update_data:
+                setattr(db_obj, field, update_data[field])
+            
+            # Update tags if provided
+            if tag_ids is not None:
+                if not tag_ids:  # Empty list
+                    default_tag = crud_tag.get_default_tag(db)
+                    db_obj.tags = [default_tag]
+                else:
+                    tags = db.query(Tag).filter(Tag.id.in_(tag_ids)).all()
+                    if len(tags) != len(tag_ids):
+                        raise ValueError("Some tag IDs are invalid")
+                    db_obj.tags = tags
+            
+            db.add(db_obj)
+            db.commit()
+            db.refresh(db_obj)
+            return db_obj
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error updating document: {str(e)}")
+            raise
+
+    def get_by_hash(
+        self,
+        db: Session,
+        *,
+        user_id: str,
+        file_hash: str
+    ) -> Optional[Document]:
+        """Get a document by user ID and file hash."""
+        try:
+            return (
+                db.query(self.model)
+                .filter(
+                    Document.user_id == user_id,
+                    Document.file_hash == file_hash
+                )
+                .first()
+            )
+        except Exception as e:
+            logger.error(f"Error fetching document by hash: {str(e)}")
             raise
 
 

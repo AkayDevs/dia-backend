@@ -1,10 +1,8 @@
 from typing import Optional, Any, List, Dict
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
-from app.schemas.analysis import (
-    AnalysisStatus,
-    AnalysisResult,
-)
+from app.schemas.analysis import AnalysisResult
+from app.schemas.tag import Tag
 import enum
 
 
@@ -22,6 +20,7 @@ class DocumentBase(BaseModel):
     type: DocumentType = Field(..., description="Document type")
     size: int = Field(..., gt=0, description="Document size in bytes")
     url: str = Field(..., min_length=1, description="Document storage URL")
+    file_hash: str = Field(..., min_length=64, max_length=64, description="SHA-256 hash of file content")
 
 
 class DocumentCreate(DocumentBase):
@@ -40,15 +39,15 @@ class DocumentCreate(DocumentBase):
 class DocumentUpdate(BaseModel):
     """Schema for document updates."""
     name: Optional[str] = Field(None, min_length=1, max_length=255)
-    status: Optional[AnalysisStatus] = None
     error_message: Optional[str] = None
+    tag_ids: Optional[List[str]] = Field(None, description="List of tag IDs to assign to document")
 
     model_config = ConfigDict(
         from_attributes=True,
         json_schema_extra={
             "example": {
                 "name": "updated_name.pdf",
-                "status": "completed"
+                "tag_ids": ["550e8400-e29b-41d4-a716-446655440000"]
             }
         }
     )
@@ -57,11 +56,11 @@ class DocumentUpdate(BaseModel):
 class Document(DocumentBase):
     """Schema for document response."""
     id: str = Field(..., description="Document unique identifier")
-    status: AnalysisStatus = Field(..., description="Document analysis status")
     uploaded_at: datetime = Field(..., description="Upload timestamp")
     updated_at: Optional[datetime] = Field(None, description="Last update timestamp")
     user_id: str = Field(..., description="Owner user ID")
     error_message: Optional[str] = Field(None, description="Error message if analysis failed")
+    tags: List[Tag] = Field(default_factory=list, description="Document tags")
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -72,10 +71,16 @@ class Document(DocumentBase):
                 "type": "pdf",
                 "size": 1048576,
                 "url": "uploads/example.pdf",
-                "status": "completed",
                 "uploaded_at": "2024-01-06T12:00:00Z",
                 "updated_at": "2024-01-06T12:30:00Z",
-                "user_id": "123e4567-e89b-12d3-a456-426614174000"
+                "user_id": "123e4567-e89b-12d3-a456-426614174000",
+                "tags": [
+                    {
+                        "id": "660e8400-e29b-41d4-a716-446655440000",
+                        "name": "important",
+                        "created_at": "2024-01-06T12:00:00Z"
+                    }
+                ]
             }
         }
     )
@@ -97,10 +102,16 @@ class DocumentWithAnalysis(Document):
                 "type": "pdf",
                 "size": 1048576,
                 "url": "uploads/example.pdf",
-                "status": "completed",
                 "uploaded_at": "2024-01-06T12:00:00Z",
                 "updated_at": "2024-01-06T12:30:00Z",
                 "user_id": "123e4567-e89b-12d3-a456-426614174000",
+                "tags": [
+                    {
+                        "id": "660e8400-e29b-41d4-a716-446655440000",
+                        "name": "important",
+                        "created_at": "2024-01-06T12:00:00Z"
+                    }
+                ],
                 "analysis_results": [
                     {
                         "id": "998e8400-e29b-41d4-a716-446655440000",

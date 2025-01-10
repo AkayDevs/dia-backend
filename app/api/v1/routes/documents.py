@@ -20,17 +20,21 @@ import magic
 import asyncio
 import logging
 from pathlib import Path
+import hashlib
+from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
 from app.db import deps
 from app.crud.crud_document import document as crud_document
+from app.crud.crud_tag import tag as crud_tag
 from app.schemas.document import (
     Document,
     DocumentCreate,
     DocumentWithAnalysis,
-    DocumentType
+    DocumentType,
+    DocumentUpdate
 )
-from app.schemas.analysis import AnalysisStatus
+from app.schemas.tag import Tag, DocumentTags
 from app.db.models.user import User
 
 router = APIRouter()
@@ -67,6 +71,9 @@ async def validate_and_save_file(
                 detail=f"File too large. Maximum size is {settings.MAX_UPLOAD_SIZE / 1024 / 1024}MB"
             )
 
+        # Calculate file hash
+        file_hash = hashlib.sha256(content).hexdigest()
+
         # Create user-specific upload directory
         user_upload_dir = Path(settings.UPLOAD_DIR) / str(user_id)
         user_upload_dir.mkdir(parents=True, exist_ok=True)
@@ -96,6 +103,7 @@ async def validate_and_save_file(
             type=doc_type,
             size=size,
             url=file_url,
+            file_hash=file_hash
         )
 
         return document, str(file_path)
@@ -192,20 +200,39 @@ async def upload_document(
     Raises:
         HTTPException: If file validation or upload fails
     """
-    doc_create, _ = await validate_and_save_file(
+    doc_create, file_path = await validate_and_save_file(
         file, str(current_user.id), background_tasks
     )
     
-    return crud_document.create_with_user(
-        db=db,
-        obj_in=doc_create,
-        user_id=str(current_user.id)
-    )
+    try:
+        return crud_document.create_with_user(
+            db=db,
+            obj_in=doc_create,
+            user_id=str(current_user.id)
+        )
+    except IntegrityError:
+        # Clean up the uploaded file
+        background_tasks.add_task(lambda: Path(file_path).unlink(missing_ok=True))
+        
+        # Return the existing document
+        existing_doc = crud_document.get_by_hash(
+            db=db,
+            user_id=str(current_user.id),
+            file_hash=doc_create.file_hash
+        )
+        if existing_doc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "message": "File already exists",
+                    "existing_document": existing_doc
+                }
+            )
+        raise
 
 
 @router.get("", response_model=List[Document])
 async def list_documents(
-    status: Optional[AnalysisStatus] = None,
     doc_type: Optional[DocumentType] = None,
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),
@@ -216,7 +243,6 @@ async def list_documents(
     List user's documents with optional filtering.
     
     Args:
-        status: Filter by analysis status
         doc_type: Filter by document type
         skip: Number of records to skip
         limit: Maximum number of records to return
@@ -231,7 +257,6 @@ async def list_documents(
         user_id=str(current_user.id),
         skip=skip,
         limit=limit,
-        status=status,
         doc_type=doc_type
     )
 
@@ -309,4 +334,150 @@ async def delete_document(
     file_path = Path(settings.UPLOAD_DIR) / document.url.replace("/uploads/", "")
     background_tasks.add_task(lambda: file_path.unlink(missing_ok=True))
 
-    return {"message": "Document deleted successfully"} 
+    return {"message": "Document deleted successfully"}
+
+
+@router.post("/{document_id}/tags", response_model=List[Tag])
+async def update_document_tags(
+    *,
+    document_id: str,
+    tags_in: DocumentTags,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_verified_user),
+) -> List[Tag]:
+    """
+    Update tags for a document.
+    
+    Args:
+        document_id: Document ID
+        tags_in: List of tag IDs to assign
+        db: Database session
+        current_user: Currently authenticated user
+        
+    Returns:
+        Updated list of document tags
+        
+    Raises:
+        HTTPException: If document is not found or tags are invalid
+    """
+    document = crud_document.get_document_with_results(
+        db=db,
+        document_id=document_id,
+        user_id=str(current_user.id),
+    )
+    if not document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found"
+        )
+    
+    try:
+        # If no tags provided, assign default tag
+        if not tags_in.tag_ids:
+            default_tag = crud_tag.get_default_tag(db)
+            return crud_tag.update_document_tags(
+                db=db,
+                document_id=document_id,
+                tag_ids=[default_tag.id]
+            )
+        
+        return crud_tag.update_document_tags(
+            db=db,
+            document_id=document_id,
+            tag_ids=tags_in.tag_ids
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+
+@router.get("/{document_id}/tags", response_model=List[Tag])
+async def get_document_tags(
+    document_id: str,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_verified_user),
+) -> List[Tag]:
+    """
+    Get all tags for a document.
+    
+    Args:
+        document_id: Document ID
+        skip: Number of records to skip
+        limit: Maximum number of records to return
+        db: Database session
+        current_user: Currently authenticated user
+        
+    Returns:
+        List of document tags
+        
+    Raises:
+        HTTPException: If document is not found
+    """
+    document = crud_document.get_document_with_results(
+        db=db,
+        document_id=document_id,
+        user_id=str(current_user.id),
+    )
+    if not document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found"
+        )
+    
+    return crud_tag.get_document_tags(
+        db=db,
+        document_id=document_id,
+        skip=skip,
+        limit=limit
+    )
+
+
+@router.patch("/{document_id}", response_model=Document)
+async def update_document(
+    *,
+    document_id: str,
+    update_data: DocumentUpdate,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_verified_user),
+) -> Document:
+    """
+    Update a document.
+    
+    Args:
+        document_id: Document ID
+        update_data: Updated document data
+        db: Database session
+        current_user: Currently authenticated user
+        
+    Returns:
+        Updated document
+        
+    Raises:
+        HTTPException: If document is not found or update fails
+    """
+    document = crud_document.get_document_with_results(
+        db=db,
+        document_id=document_id,
+        user_id=str(current_user.id),
+    )
+    if not document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found"
+        )
+    
+    try:
+        return crud_document.update_with_tags(
+            db=db,
+            db_obj=document,
+            obj_in=update_data
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        ) 

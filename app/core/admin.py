@@ -13,6 +13,7 @@ import jwt as PyJWT
 from datetime import datetime
 import logging
 from app.schemas.analysis import AnalysisStatus
+from markupsafe import Markup
 
 logger = logging.getLogger(__name__)
 
@@ -195,9 +196,9 @@ class UserAdmin(ModelView, model=User):
         User.is_active, User.created_at, User.updated_at
     ]
     column_formatters = {
-        User.is_active: lambda m, a: "✓" if m.is_active else "✗",
-        User.is_verified: lambda m, a: "✓" if m.is_verified else "✗",
-        User.role: lambda m, a: f"<span class='badge badge-{'primary' if m.role == UserRole.ADMIN else 'secondary'}'>{m.role.value}</span>"
+        User.is_active: lambda m, a: Markup("✓") if m.is_active else Markup("✗"),
+        User.is_verified: lambda m, a: Markup("✓") if m.is_verified else Markup("✗"),
+        User.role: lambda m, a: Markup(f"<span class='badge badge-{'primary' if m.role == UserRole.ADMIN else 'secondary'}'>{m.role.value}</span>")
     }
     
     can_create = False
@@ -231,34 +232,79 @@ class DocumentAdmin(ModelView, model=Document):
     name = "Document"
     name_plural = "Documents"
     icon = "fa-solid fa-file"
+    
+    # Enhanced column list with all relevant fields
     column_list = [
-        Document.id, Document.name, Document.type, 
-        Document.status, Document.uploaded_at, Document.size,
-        Document.user_id
+        Document.id,
+        Document.name,
+        Document.type,
+        Document.size,
+        Document.uploaded_at,
+        Document.updated_at,
+        Document.user_id,
+        Document.file_hash,
+        Document.url
     ]
-    column_searchable_list = [Document.name, Document.user_id]
+    
+    # Enhanced searchable list
+    column_searchable_list = [
+        Document.name,
+        Document.id,
+        Document.user_id,
+        Document.file_hash
+    ]
+    
+    # Enhanced sortable list
     column_sortable_list = [
-        Document.uploaded_at, Document.name, 
-        Document.status, Document.size
+        Document.uploaded_at,
+        Document.updated_at,
+        Document.name,
+        Document.size,
+        Document.type
     ]
+    
+    # Improved formatters with better visual representation
     column_formatters = {
-        Document.status: lambda m, a: f"<span class='badge badge-{m.status.value.lower()}'>{m.status.value}</span>",
-        Document.type: lambda m, a: f"<span class='badge badge-info'>{m.type.value}</span>",
-        Document.size: lambda m, a: f"{m.size / 1024:.2f} KB"
+        Document.type: lambda m, a: Markup(f"<span class='badge badge-info'>{m.type.value}</span>"),
+        Document.size: lambda m, a: Markup(f"{m.size / (1024 * 1024):.2f} MB") if m.size >= 1024 * 1024 else Markup(f"{m.size / 1024:.2f} KB"),
+        Document.url: lambda m, a: Markup(f"<a href='{m.url}' target='_blank'>{m.url.split('/')[-1]}</a>"),
+        Document.file_hash: lambda m, a: Markup(f"<span class='text-muted'>{m.file_hash[:8]}...{m.file_hash[-8:]}</span>")
     }
     
+    # Enhanced column descriptions
     column_descriptions = {
-        Document.name: "Document name",
-        Document.type: "Document type",
-        Document.status: "Analysis status",
-        Document.uploaded_at: "Upload date",
+        Document.id: "Unique identifier for the document",
+        Document.name: "Original filename of the document",
+        Document.type: "Type of document (PDF, DOCX, XLSX, IMAGE)",
         Document.size: "File size in bytes",
-        Document.user_id: "Owner user ID"
+        Document.uploaded_at: "When the document was uploaded",
+        Document.updated_at: "Last modification date",
+        Document.user_id: "ID of the user who owns this document",
+        Document.file_hash: "SHA-256 hash of the file content for deduplication",
+        Document.url: "Storage location of the document"
     }
     
+    # Details view with all fields and relationships
+    column_details_list = [
+        Document.id,
+        Document.name,
+        Document.type,
+        Document.size,
+        Document.uploaded_at,
+        Document.updated_at,
+        Document.user_id,
+        Document.file_hash,
+        Document.url,
+        'tags',
+        'analysis_results'
+    ]
+    
+    # Keep security settings
     can_create = False
     can_delete = False
     can_edit = False
+    
+    # Pagination settings from global config
     page_size = settings.ADMIN_PAGE_SIZE
     page_size_options = settings.ADMIN_PAGE_SIZE_OPTIONS
 
@@ -290,9 +336,9 @@ class AnalysisResultAdmin(ModelView, model=AnalysisResult):
         AnalysisResult.progress
     ]
     column_formatters = {
-        AnalysisResult.type: lambda m, a: f"<span class='badge badge-info'>{m.type.value}</span>",
-        AnalysisResult.status: lambda m, a: f"<span class='badge badge-{_get_status_badge(m.status)}'>{m.status.value}</span>",
-        AnalysisResult.progress: lambda m, a: f"<div class='progress'><div class='progress-bar' role='progressbar' style='width: {m.progress}%' aria-valuenow='{m.progress}' aria-valuemin='0' aria-valuemax='100'>{m.progress}%</div></div>"
+        AnalysisResult.type: lambda m, a: Markup(f"<span class='badge badge-info'>{m.type.value}</span>"),
+        AnalysisResult.status: lambda m, a: Markup(f"<span class='badge badge-{_get_status_badge(m.status)}'>{m.status.value}</span>"),
+        AnalysisResult.progress: lambda m, a: Markup(f"<div class='progress'><div class='progress-bar' role='progressbar' style='width: {m.progress}%' aria-valuenow='{m.progress}' aria-valuemin='0' aria-valuemax='100'>{m.progress}%</div></div>")
     }
     
     column_descriptions = {

@@ -91,11 +91,28 @@ async def on_startup():
         # Verify database health
         health_status = check_database_health(db)
         if not all(health_status.values()):
+            logger.error("Database health check failed:")
+            for check, status in health_status.items():
+                if not status:
+                    logger.error(f"- {check}: Failed")
             raise Exception("Database health check failed")
             
-        # Check final database state
-        check_database_state(db)
+        # Get complete database state
+        db_state = check_database_state(db)
+        
+        # Log database state information
+        logger.info("Database state:")
+        logger.info(f"- Tables: {', '.join(db_state['tables'])}")
+        logger.info("- Row counts:")
+        for table, count in db_state['row_counts'].items():
+            logger.info(f"  * {table}: {count} rows")
+        if db_state['storage_info'].get('total_size_bytes'):
+            size_mb = db_state['storage_info']['total_size_bytes'] / (1024 * 1024)
+            logger.info(f"- Database size: {size_mb:.2f} MB")
             
+    except Exception as e:
+        logger.error(f"Startup failed: {e}")
+        raise
     finally:
         db.close()
 
