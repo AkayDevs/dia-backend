@@ -12,9 +12,13 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from app.db.base import Base
 from app.core.config import settings
+from app.core.logging_conf import setup_logging, LOGS_DIR
+
+# Initialize logging using project's configuration
+setup_logging()
 
 # Initialize logger
-logger = logging.getLogger("alembic.env")
+logger = logging.getLogger("app.db.migrations")
 
 def get_url() -> str:
     """Get the SQLAlchemy URL from settings."""
@@ -50,6 +54,7 @@ def run_migrations_offline() -> None:
     though an Engine is acceptable here as well.
     By skipping the Engine creation we don't even need a DBAPI to be available.
     """
+    logger.info("Running migrations offline")
     context.configure(
         url=get_url(),
         target_metadata=Base.metadata,
@@ -64,6 +69,7 @@ def run_migrations_offline() -> None:
 
     with context.begin_transaction():
         context.run_migrations()
+    logger.info("Offline migrations completed")
 
 def process_revision_directives(context, revision, directives) -> None:
     """Allow customizing revision generation.
@@ -86,6 +92,8 @@ def run_migrations_online() -> None:
     In this scenario we need to create an Engine and associate a connection
     with the context.
     """
+    logger.info("Starting online migrations")
+    
     # Configure SQLAlchemy URL
     configuration = config.get_section(config.config_ini_section) or {}
     configuration["sqlalchemy.url"] = get_url()
@@ -111,19 +119,17 @@ def run_migrations_online() -> None:
         )
 
         try:
+            logger.info("Executing migration transaction")
             with context.begin_transaction():
                 context.run_migrations()
+            logger.info("Migration transaction completed successfully")
         except Exception as e:
-            logger.error(f"Error during migration: {e}")
+            logger.error(f"Error during migration: {str(e)}", exc_info=True)
             raise
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
-
-# Interpret the config file for Python logging.
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
 
 # add your model's MetaData object here for 'autogenerate' support
 target_metadata = Base.metadata
@@ -131,4 +137,4 @@ target_metadata = Base.metadata
 if context.is_offline_mode():
     run_migrations_offline()
 else:
-    run_migrations_online() 
+    run_migrations_online()
