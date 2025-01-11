@@ -65,6 +65,10 @@ class DocumentCreate(DocumentBase):
         default=None,
         description="List of tag IDs to associate with the document"
     )
+    previous_version_id: Optional[str] = Field(
+        default=None,
+        description="ID of the previous version of this document"
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -73,7 +77,8 @@ class DocumentCreate(DocumentBase):
                 "type": "pdf",
                 "size": 1048576,  # 1MB
                 "url": "uploads/example.pdf",
-                "tag_ids": [1, 2]
+                "tag_ids": [1, 2],
+                "previous_version_id": None
             }
         }
     )
@@ -102,6 +107,10 @@ class Document(DocumentBase):
     updated_at: Optional[datetime] = Field(None, description="Last update timestamp")
     user_id: str = Field(..., description="Owner user ID")
     tags: List[Tag] = Field(default_factory=list, description="Document tags")
+    previous_version_id: Optional[str] = Field(None, description="ID of the previous version")
+    is_archived: bool = Field(default=False, description="Whether this document is archived")
+    archived_at: Optional[datetime] = Field(None, description="When the document was archived")
+    retention_until: Optional[datetime] = Field(None, description="Date until which the archived document will be retained")
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -121,7 +130,11 @@ class Document(DocumentBase):
                         "name": "important",
                         "created_at": "2024-01-06T12:00:00Z"
                     }
-                ]
+                ],
+                "previous_version_id": None,
+                "is_archived": False,
+                "archived_at": None,
+                "retention_until": None
             }
         }
     )

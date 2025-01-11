@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 import uuid
 import os
 import shutil
-from datetime import datetime
+from datetime import datetime, timedelta
 import aiofiles
 import magic
 import asyncio
@@ -32,9 +32,10 @@ from app.schemas.document import (
     DocumentUpdate,
     DocumentWithAnalysis,
     DocumentType,
-    Tag,
+    Tag as TagSchema,
     TagCreate
 )
+from app.db.models.document import Tag
 from app.db.models.user import User
 
 router = APIRouter()
@@ -113,8 +114,21 @@ async def validate_and_save_file(
         )
 
 
+async def cleanup_archived_file(file_path: Path):
+    """
+    Cleanup an archived file after the retention period.
+    """
+    try:
+        await asyncio.sleep(settings.ARCHIVE_RETENTION_DAYS * 24 * 60 * 60)
+        if file_path.exists():
+            file_path.unlink()
+            logger.info(f"Cleaned up archived file: {file_path}")
+    except Exception as e:
+        logger.error(f"Failed to cleanup archived file {file_path}: {str(e)}")
+
+
 # Tag Management Endpoints
-@router.get("/tag-list", response_model=List[Tag])
+@router.get("/tag-list", response_model=List[TagSchema])
 async def list_tags(
     document_id: Optional[str] = Query(None, description="Get tags for specific document"),
     name_filter: Optional[str] = Query(None, description="Filter tags by name"),
@@ -122,7 +136,7 @@ async def list_tags(
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_verified_user)
-) -> List[Tag]:
+) -> List[TagSchema]:
     """
     List tags with optional filtering.
     
@@ -160,12 +174,12 @@ async def list_tags(
         name_filter=name_filter
     )
 
-@router.post("/tag-list", response_model=Tag)
+@router.post("/tag-list", response_model=TagSchema)
 async def create_tag(
     tag_in: TagCreate,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_verified_user)
-) -> Tag:
+) -> TagSchema:
     """
     Create a new tag.
     """
@@ -196,13 +210,13 @@ async def delete_tag(
     crud_tag.remove(db, id=tag_id)
     return {"message": "Tag deleted successfully"}
 
-@router.patch("/tag-list/{tag_id}", response_model=Tag)
+@router.patch("/tag-list/{tag_id}", response_model=TagSchema)
 async def update_tag(
     tag_id: int,
     tag_in: TagCreate,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_verified_user)
-) -> Tag:
+) -> TagSchema:
     """
     Update a tag's properties.
     
@@ -533,7 +547,8 @@ async def delete_document(
 async def update_document(
     document_id: str,
     file: Optional[UploadFile] = File(None),
-    update_data: Optional[DocumentUpdate] = None,
+    name: Optional[str] = Form(None),
+    tag_ids: Optional[str] = Form(None),
     background_tasks: BackgroundTasks = BackgroundTasks(),
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_verified_user),
@@ -541,22 +556,30 @@ async def update_document(
     """
     Update a document's metadata and/or content.
     
+    If a new file is provided, the current document will be archived and a new version created.
+    Archived documents are retained for ARCHIVE_RETENTION_DAYS days before being cleaned up.
+    If only metadata is provided (name and/or tags), the current document will be updated.
+    
     Args:
         document_id: Document ID to update
         file: Optional new file content
-        update_data: Optional metadata updates
+        name: Optional new name for the document
+        tag_ids: Optional comma-separated list of tag IDs (e.g., "1,2,3")
         background_tasks: Background tasks runner
         db: Database session
         current_user: Currently authenticated user
         
     Returns:
-        Updated document
+        Updated document or new document version
         
     Raises:
-        HTTPException: If document is not found or user doesn't have permission
+        HTTPException: 
+            404: Document not found
+            403: Not enough permissions
+            400: Invalid tag format or no updates provided
     """
     try:
-        # Check if document exists and belongs to user
+        # Validate document exists and user has permission
         document = crud_document.get(db, id=document_id)
         if not document:
             raise HTTPException(
@@ -569,73 +592,205 @@ async def update_document(
                 detail="Not enough permissions"
             )
 
-        logger.info(f"Updating document: {document_id}", extra={
-            "user_id": str(current_user.id),
-            "has_file": bool(file),
-            "update_data": update_data.model_dump(exclude_unset=True) if update_data else None
-        })
-        
-        # If there's a new file, handle content update
-        if file:
-            # Validate and save the new file
-            doc_create, file_path = await validate_and_save_file(
-                file, str(current_user.id), background_tasks
-            )
-            
-            # Archive the old document
-            document.is_archived = True
-            document.archived_at = datetime.utcnow()
-            db.add(document)
-            
-            # Create new document version
-            new_document = Document(
-                id=str(uuid.uuid4()),
-                name=update_data.name if update_data and update_data.name else document.name,
-                type=doc_create.type,
-                size=doc_create.size,
-                url=doc_create.url,
-                user_id=str(current_user.id),
-                previous_version_id=document.id,
-                tags=document.tags  # Preserve tags from previous version
-            )
-            db.add(new_document)
-            
-            # Schedule cleanup of old file after retention period
-            old_file_path = Path(settings.UPLOAD_DIR) / document.url.replace("/uploads/", "")
-            background_tasks.add_task(
-                lambda: asyncio.sleep(settings.ARCHIVE_RETENTION_DAYS * 24 * 60 * 60) and old_file_path.unlink(missing_ok=True)
-            )
-            
-            db.commit()
-            db.refresh(new_document)
-            return new_document
-            
-        # If only metadata update, use existing update logic
-        elif update_data:
-            updated_document = crud_document.update(
-                db=db,
-                db_obj=document,
-                obj_in=update_data
-            )
-            logger.info(f"Successfully updated document metadata: {document_id}", extra={
-                "user_id": str(current_user.id)
-            })
-            return updated_document
-        
-        else:
+        # Parse and validate tag_ids if provided
+        parsed_tag_ids = None
+        existing_tags = []
+        if tag_ids:
+            try:
+                parsed_tag_ids = [int(tid.strip()) for tid in tag_ids.split(',') if tid.strip()]
+                # Validate tags exist
+                existing_tags = db.query(Tag).filter(Tag.id.in_(parsed_tag_ids)).all()
+                if len(existing_tags) != len(parsed_tag_ids):
+                    found_ids = {tag.id for tag in existing_tags}
+                    missing_ids = [tid for tid in parsed_tag_ids if tid not in found_ids]
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Tags not found: {missing_ids}"
+                    )
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid tag_ids format. Expected comma-separated integers (e.g., '1,2,3')"
+                )
+
+        # Ensure at least one update field is provided
+        if not any([file, name, tag_ids]):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No updates provided"
             )
+
+        # Log update attempt
+        logger.info(f"Updating document: {document_id}", extra={
+            "user_id": str(current_user.id),
+            "has_file": bool(file),
+            "new_name": name,
+            "tag_ids": parsed_tag_ids
+        })
+        
+        # Handle file update (creates new version)
+        if file and file.filename:
+            try:
+                # Validate and save the new file
+                doc_create, _ = await validate_and_save_file(
+                    file, str(current_user.id), background_tasks
+                )
+                
+                # Archive the old document
+                document.is_archived = True
+                document.archived_at = datetime.utcnow()
+                document.retention_until = document.archived_at + timedelta(days=settings.ARCHIVE_RETENTION_DAYS)
+                db.add(document)
+                
+                # Create new document version using CRUD utility
+                doc_create.name = name if name else document.name
+                doc_create.previous_version_id = document.id
+                new_document = crud_document.create_with_user(
+                    db=db,
+                    obj_in=doc_create,
+                    user_id=str(current_user.id)
+                )
+                
+                # Set tags
+                if parsed_tag_ids is not None:
+                    new_document.tags = existing_tags
+                else:
+                    new_document.tags = document.tags
+                
+                db.add(new_document)
+                
+                # Schedule cleanup of old file
+                old_file_path = Path(settings.UPLOAD_DIR) / document.url.replace("/uploads/", "")
+                background_tasks.add_task(cleanup_archived_file, old_file_path)
+                
+                db.commit()
+                db.refresh(new_document)
+                
+                logger.info(f"Created new document version: {new_document.id}", extra={
+                    "user_id": str(current_user.id),
+                    "original_document_id": document_id,
+                    "retention_until": document.retention_until.isoformat()
+                })
+                return new_document
+                
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Failed to create new document version: {str(e)}", extra={
+                    "user_id": str(current_user.id),
+                    "original_document_id": document_id
+                })
+                raise
+            
+        # Handle metadata-only update
+        else:
+            try:
+                # Update basic metadata
+                if name is not None:
+                    document.name = name
+                    document.updated_at = datetime.utcnow()
+                
+                # Update tags if provided
+                if parsed_tag_ids is not None:
+                    document.tags = existing_tags
+                    document.updated_at = datetime.utcnow()
+                
+                db.add(document)
+                db.commit()
+                db.refresh(document)
+                
+                logger.info(f"Updated document metadata: {document_id}", extra={
+                    "user_id": str(current_user.id),
+                    "updates": {
+                        "new_name": name,
+                        "tag_ids": parsed_tag_ids
+                    }
+                })
+                return document
+                
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Failed to update document metadata: {str(e)}", extra={
+                    "user_id": str(current_user.id),
+                    "document_id": document_id
+                })
+                raise
             
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error updating document: {document_id}", extra={
+        logger.error(f"Error updating document: {str(e)}", extra={
             "user_id": str(current_user.id),
-            "error": str(e)
+            "document_id": document_id,
+            "error_details": str(e)
         })
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update document"
+        ) 
+
+@router.get("/{document_id}/versions", response_model=List[Document])
+async def get_document_versions(
+    document_id: str,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_verified_user),
+) -> List[Document]:
+    """
+    Get version history of a document.
+    Returns a list of all versions of the document, including archived versions,
+    ordered from newest to oldest.
+    
+    Args:
+        document_id: Document ID to get versions for
+        db: Database session
+        current_user: Currently authenticated user
+        
+    Returns:
+        List of document versions
+        
+    Raises:
+        HTTPException: If document is not found or user lacks permission
+    """
+    try:
+        # Get the initial document
+        document = crud_document.get(db, id=document_id)
+        if not document:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Document not found"
+            )
+        if str(document.user_id) != str(current_user.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not enough permissions"
+            )
+        
+        # Get all versions
+        versions = [document]
+        current_version = document
+        
+        # Traverse backwards through version history
+        while current_version.previous_version_id:
+            previous_version = crud_document.get(db, id=current_version.previous_version_id)
+            if not previous_version:
+                break
+            versions.append(previous_version)
+            current_version = previous_version
+        
+        logger.info(f"Retrieved version history for document: {document_id}", extra={
+            "user_id": str(current_user.id),
+            "version_count": len(versions)
+        })
+        
+        return versions
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving document versions: {str(e)}", extra={
+            "user_id": str(current_user.id),
+            "document_id": document_id
+        })
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve document versions"
         ) 

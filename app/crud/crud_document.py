@@ -30,6 +30,7 @@ class CRUDDocument(CRUDBase[Document, DocumentCreate, DocumentUpdate]):
                 size=obj_in.size,
                 url=obj_in.url,
                 user_id=user_id,
+                previous_version_id=obj_in.previous_version_id,
                 uploaded_at=now,
                 updated_at=now
             )
