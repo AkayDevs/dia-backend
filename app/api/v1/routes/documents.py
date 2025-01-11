@@ -277,7 +277,7 @@ async def update_document_tags(
 @router.post("", response_model=Document)
 async def upload_document(
     file: UploadFile = File(...),
-    tag_ids: List[int] = Form(default=None),
+    tag_ids: str = Form(None),
     background_tasks: BackgroundTasks = BackgroundTasks(),
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_verified_user),
@@ -293,21 +293,31 @@ async def upload_document(
             "tag_ids": tag_ids
         })
 
-        # Validate tags if provided
+        # Parse tag_ids from string to list of integers if provided
+        parsed_tag_ids = None
         if tag_ids:
-            for tag_id in tag_ids:
-                if not crud_tag.get(db, id=tag_id):
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"Tag with id {tag_id} not found"
-                    )
+            try:
+                # Handle comma-separated string of tag IDs
+                parsed_tag_ids = [int(tid.strip()) for tid in tag_ids.split(',') if tid.strip()]
+                # Validate tags if provided
+                for tag_id in parsed_tag_ids:
+                    if not crud_tag.get(db, id=tag_id):
+                        raise HTTPException(
+                            status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"Tag with id {tag_id} not found"
+                        )
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid tag_ids format. Expected comma-separated integers"
+                )
 
         doc_create, _ = await validate_and_save_file(
             file, str(current_user.id), background_tasks
         )
         
-        # Add tag IDs to document creation
-        doc_create.tag_ids = tag_ids
+        # Add parsed tag IDs to document creation
+        doc_create.tag_ids = parsed_tag_ids
         
         document = crud_document.create_with_user(
             db=db,
@@ -318,9 +328,11 @@ async def upload_document(
         logger.info(f"Successfully created document: {file.filename}", extra={
             "user_id": str(current_user.id),
             "document_id": str(document.id),
-            "tag_ids": tag_ids
+            "tag_ids": parsed_tag_ids
         })
         return document
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to create document: {file.filename}", extra={
             "user_id": str(current_user.id),
