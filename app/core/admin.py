@@ -1,6 +1,6 @@
 from sqladmin import ModelView, Admin
 from sqladmin.authentication import AuthenticationBackend
-from app.db.models.document import Document
+from app.db.models.document import Document, Tag
 from app.db.models.analysis_result import AnalysisResult
 from app.db.models.token import BlacklistedToken
 from app.db.models.user import User, UserRole
@@ -179,6 +179,34 @@ class AdminAuth(AuthenticationBackend):
             )
 
 
+class TagAdmin(ModelView, model=Tag):
+    """Admin interface for Tag model."""
+    name = "Tag"
+    name_plural = "Tags"
+    icon = "fa-solid fa-tag"
+    column_list = [
+        Tag.id,
+        Tag.name,
+        Tag.created_at
+    ]
+    column_searchable_list = [Tag.name]
+    column_sortable_list = [
+        Tag.name,
+        Tag.created_at
+    ]
+    
+    column_descriptions = {
+        Tag.name: "Tag name",
+        Tag.created_at: "When the tag was created"
+    }
+    
+    can_create = True
+    can_delete = True
+    can_edit = True
+    page_size = settings.ADMIN_PAGE_SIZE
+    page_size_options = settings.ADMIN_PAGE_SIZE_OPTIONS
+
+
 class UserAdmin(ModelView, model=User):
     """Admin interface for User model."""
     name = "User"
@@ -232,33 +260,46 @@ class DocumentAdmin(ModelView, model=Document):
     name_plural = "Documents"
     icon = "fa-solid fa-file"
     column_list = [
-        Document.id, Document.name, Document.type, 
-        Document.status, Document.uploaded_at, Document.size,
-        Document.user_id
+        Document.id,
+        Document.name,
+        Document.type,
+        Document.uploaded_at,
+        Document.updated_at,
+        Document.size,
+        Document.user_id,
+        'tags'
     ]
     column_searchable_list = [Document.name, Document.user_id]
     column_sortable_list = [
-        Document.uploaded_at, Document.name, 
-        Document.status, Document.size
+        Document.uploaded_at,
+        Document.updated_at,
+        Document.name,
+        Document.size
     ]
     column_formatters = {
-        Document.status: lambda m, a: f"<span class='badge badge-{m.status.value.lower()}'>{m.status.value}</span>",
         Document.type: lambda m, a: f"<span class='badge badge-info'>{m.type.value}</span>",
-        Document.size: lambda m, a: f"{m.size / 1024:.2f} KB"
+        Document.size: lambda m, a: f"{m.size / 1024:.2f} KB",
+        'tags': lambda m, a: ", ".join([f"<span class='badge badge-secondary'>{tag.name}</span>" for tag in m.tags])
     }
     
     column_descriptions = {
         Document.name: "Document name",
         Document.type: "Document type",
-        Document.status: "Analysis status",
         Document.uploaded_at: "Upload date",
+        Document.updated_at: "Last update date",
         Document.size: "File size in bytes",
-        Document.user_id: "Owner user ID"
+        Document.user_id: "Owner user ID",
+        'tags': "Document tags"
     }
     
     can_create = False
     can_delete = False
-    can_edit = False
+    can_edit = True  # Allow editing for tags
+    form_columns = [
+        Document.name,
+        'tags'
+    ]
+    
     page_size = settings.ADMIN_PAGE_SIZE
     page_size_options = settings.ADMIN_PAGE_SIZE_OPTIONS
 
@@ -382,6 +423,7 @@ def setup_admin(app, engine) -> Admin:
         # Add views
         admin.add_view(UserAdmin)
         admin.add_view(DocumentAdmin)
+        admin.add_view(TagAdmin)
         admin.add_view(AnalysisResultAdmin)
         admin.add_view(BlacklistedTokenAdmin)
         

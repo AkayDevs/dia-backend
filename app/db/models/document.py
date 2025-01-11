@@ -1,4 +1,4 @@
-from sqlalchemy import String, Integer, DateTime, Enum, ForeignKey, Index
+from sqlalchemy import String, Integer, DateTime, Enum, ForeignKey, Index, Table, Column
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from typing import List, TYPE_CHECKING
@@ -6,10 +6,38 @@ from typing import List, TYPE_CHECKING
 from app.db.base_class import Base
 from app.schemas.document import DocumentType
 from app.db.models.analysis_result import AnalysisResult
-from app.schemas.analysis import AnalysisStatus
 
 if TYPE_CHECKING:
     from app.db.models.user import User
+
+# Association table for document-tag many-to-many relationship
+document_tags = Table(
+    'document_tags',
+    Base.metadata,
+    Column('document_id', String, ForeignKey('documents.id', ondelete="CASCADE"), primary_key=True),
+    Column('tag_id', Integer, ForeignKey('tags.id', ondelete="CASCADE"), primary_key=True),
+    Index('ix_document_tags_document_id', 'document_id'),
+    Index('ix_document_tags_tag_id', 'tag_id')
+)
+
+class Tag(Base):
+    __tablename__ = "tags"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False
+    )
+    
+    # Relationship with documents
+    documents: Mapped[List["Document"]] = relationship(
+        "Document",
+        secondary=document_tags,
+        back_populates="tags",
+        lazy="selectin"
+    )
 
 class Document(Base):
     __tablename__ = "documents"
@@ -17,14 +45,15 @@ class Document(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     type: Mapped[DocumentType] = mapped_column(Enum(DocumentType), nullable=False)
-    status: Mapped[AnalysisStatus] = mapped_column(
-        Enum(AnalysisStatus),
-        default=AnalysisStatus.PENDING,
-        nullable=False
-    )
     uploaded_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
+        nullable=False
+    )
+    updated_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
         nullable=False
     )
     size: Mapped[int] = mapped_column(Integer, nullable=False)  # Size in bytes
@@ -50,12 +79,20 @@ class Document(Base):
         lazy="selectin"
     )
 
+    # Tags relationship
+    tags: Mapped[List["Tag"]] = relationship(
+        "Tag",
+        secondary=document_tags,
+        back_populates="documents",
+        lazy="selectin"
+    )
+
     # Indexes for common queries
     __table_args__ = (
         # Index for user's documents list with sorting by upload date
         Index('ix_documents_user_id_uploaded_at', user_id, uploaded_at.desc()),
-        # Index for filtering by status and type
-        Index('ix_documents_status_type', status, type),
+        # Index for filtering by type
+        Index('ix_documents_type', type),
         # Index for name search
         Index('ix_documents_name', name),
     )

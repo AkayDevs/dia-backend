@@ -8,7 +8,8 @@ from fastapi import (
     status, 
     Query, 
     BackgroundTasks,
-    Form
+    Form,
+    Body
 )
 from sqlalchemy.orm import Session
 import uuid
@@ -27,6 +28,7 @@ from app.crud.crud_document import document as crud_document
 from app.schemas.document import (
     Document,
     DocumentCreate,
+    DocumentUpdate,
     DocumentWithAnalysis,
     DocumentType
 )
@@ -224,7 +226,6 @@ async def upload_document(
 
 @router.get("", response_model=List[Document])
 async def list_documents(
-    status: Optional[AnalysisStatus] = None,
     doc_type: Optional[DocumentType] = None,
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),
@@ -235,7 +236,6 @@ async def list_documents(
     List user's documents with optional filtering.
     
     Args:
-        status: Filter by analysis status
         doc_type: Filter by document type
         skip: Number of records to skip
         limit: Maximum number of records to return
@@ -250,7 +250,6 @@ async def list_documents(
         user_id=str(current_user.id),
         skip=skip,
         limit=limit,
-        status=status,
         doc_type=doc_type
     )
 
@@ -345,4 +344,70 @@ async def delete_document(
     file_path = Path(settings.UPLOAD_DIR) / document.url.replace("/uploads/", "")
     background_tasks.add_task(lambda: file_path.unlink(missing_ok=True))
 
-    return {"message": "Document deleted successfully"} 
+    return {"message": "Document deleted successfully"}
+
+
+@router.patch("/{document_id}", response_model=Document)
+async def update_document(
+    document_id: str,
+    update_data: DocumentUpdate,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_verified_user),
+) -> Document:
+    """
+    Update a document's metadata.
+    
+    Args:
+        document_id: Document ID to update
+        update_data: Updated document data
+        db: Database session
+        current_user: Currently authenticated user
+        
+    Returns:
+        Updated document
+        
+    Raises:
+        HTTPException: If document is not found or user doesn't have permission
+    """
+    try:
+        # Check if document exists and belongs to user
+        document = crud_document.get(db, id=document_id)
+        if not document:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Document not found"
+            )
+        if str(document.user_id) != str(current_user.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not enough permissions"
+            )
+
+        logger.info(f"Updating document: {document_id}", extra={
+            "user_id": str(current_user.id),
+            "update_data": update_data.model_dump(exclude_unset=True)
+        })
+        
+        # Update the document
+        updated_document = crud_document.update(
+            db=db,
+            db_obj=document,
+            obj_in=update_data
+        )
+        
+        logger.info(f"Successfully updated document: {document_id}", extra={
+            "user_id": str(current_user.id)
+        })
+        return updated_document
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating document: {document_id}", extra={
+            "user_id": str(current_user.id),
+            "error": str(e)
+        })
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update document"
+        ) 

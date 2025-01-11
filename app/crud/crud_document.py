@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 import uuid
@@ -22,6 +22,7 @@ class CRUDDocument(CRUDBase[Document, DocumentCreate, DocumentUpdate]):
     ) -> Document:
         """Create a new document with user ID and proper error handling."""
         try:
+            now = datetime.utcnow()
             db_obj = Document(
                 id=str(uuid.uuid4()),
                 name=obj_in.name,
@@ -29,8 +30,8 @@ class CRUDDocument(CRUDBase[Document, DocumentCreate, DocumentUpdate]):
                 size=obj_in.size,
                 url=obj_in.url,
                 user_id=user_id,
-                uploaded_at=datetime.utcnow(),
-                status=AnalysisStatus.PENDING
+                uploaded_at=now,
+                updated_at=now
             )
             db.add(db_obj)
             db.commit()
@@ -41,6 +42,29 @@ class CRUDDocument(CRUDBase[Document, DocumentCreate, DocumentUpdate]):
             logger.error(f"Error creating document: {str(e)}")
             raise
 
+    def update(
+        self,
+        db: Session,
+        *,
+        db_obj: Document,
+        obj_in: Union[DocumentUpdate, Dict[str, Any]]
+    ) -> Document:
+        """Update a document with updated_at timestamp."""
+        try:
+            if isinstance(obj_in, dict):
+                update_data = obj_in
+            else:
+                update_data = obj_in.model_dump(exclude_unset=True)
+
+            # Always update the updated_at timestamp
+            update_data["updated_at"] = datetime.utcnow()
+
+            return super().update(db, db_obj=db_obj, obj_in=update_data)
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error updating document: {str(e)}")
+            raise
+
     def get_multi_by_user(
         self,
         db: Session,
@@ -48,15 +72,11 @@ class CRUDDocument(CRUDBase[Document, DocumentCreate, DocumentUpdate]):
         user_id: str,
         skip: int = 0,
         limit: int = 100,
-        status: Optional[AnalysisStatus] = None,
         doc_type: Optional[DocumentType] = None
     ) -> List[Document]:
-        """Get all documents for a user with status and type filtering."""
+        """Get all documents for a user with type filtering."""
         try:
             query = db.query(self.model).filter(Document.user_id == user_id)
-            
-            if status:
-                query = query.filter(Document.status == status)
             
             if doc_type:
                 query = query.filter(Document.type == doc_type)
@@ -90,35 +110,6 @@ class CRUDDocument(CRUDBase[Document, DocumentCreate, DocumentUpdate]):
             )
         except Exception as e:
             logger.error(f"Error fetching document with results: {str(e)}")
-            raise
-
-    def update_status(
-        self, 
-        db: Session, 
-        *, 
-        document_id: str, 
-        status: AnalysisStatus,
-        error_message: Optional[str] = None
-    ) -> Optional[Document]:
-        """Update document status with error handling."""
-        try:
-            document = db.query(self.model).filter(Document.id == document_id).first()
-            if not document:
-                logger.warning(f"Document not found: {document_id}")
-                return None
-
-            document.status = status
-            if error_message:
-                document.error_message = error_message
-            document.updated_at = datetime.utcnow()
-            
-            db.add(document)
-            db.commit()
-            db.refresh(document)
-            return document
-        except Exception as e:
-            db.rollback()
-            logger.error(f"Error updating document status: {str(e)}")
             raise
 
     def get_by_type(

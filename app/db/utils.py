@@ -43,7 +43,6 @@ def verify_database_schema(db: Session) -> bool:
         expected_doc_indexes = {
             'ix_documents_id',
             'ix_documents_name',
-            'ix_documents_status_type',
             'ix_documents_user_id_uploaded_at'
         }
         
