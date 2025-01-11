@@ -7,8 +7,8 @@ from datetime import datetime
 
 from app.crud.base import CRUDBase
 from app.db.models.document import Document
+from app.db.models.document import Tag
 from app.schemas.document import DocumentCreate, DocumentUpdate, DocumentType
-from app.schemas.analysis import AnalysisStatus
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ class CRUDDocument(CRUDBase[Document, DocumentCreate, DocumentUpdate]):
         obj_in: DocumentCreate, 
         user_id: str
     ) -> Document:
-        """Create a new document with user ID and proper error handling."""
+        """Create a new document with user ID and tags."""
         try:
             now = datetime.utcnow()
             db_obj = Document(
@@ -33,6 +33,12 @@ class CRUDDocument(CRUDBase[Document, DocumentCreate, DocumentUpdate]):
                 uploaded_at=now,
                 updated_at=now
             )
+            
+            # Add tags if provided
+            if obj_in.tag_ids:
+                tags = db.query(Tag).filter(Tag.id.in_(obj_in.tag_ids)).all()
+                db_obj.tags = tags
+                
             db.add(db_obj)
             db.commit()
             db.refresh(db_obj)
@@ -65,6 +71,31 @@ class CRUDDocument(CRUDBase[Document, DocumentCreate, DocumentUpdate]):
             logger.error(f"Error updating document: {str(e)}")
             raise
 
+    def update_tags(
+        self,
+        db: Session,
+        *,
+        db_obj: Document,
+        tag_ids: List[int]
+    ) -> Document:
+        """Update document tags."""
+        try:
+            # Get tags from database
+            tags = db.query(Tag).filter(Tag.id.in_(tag_ids)).all()
+            
+            # Update document tags
+            db_obj.tags = tags
+            db_obj.updated_at = datetime.utcnow()
+            
+            db.add(db_obj)
+            db.commit()
+            db.refresh(db_obj)
+            return db_obj
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error updating document tags: {str(e)}")
+            raise
+
     def get_multi_by_user(
         self,
         db: Session,
@@ -72,14 +103,18 @@ class CRUDDocument(CRUDBase[Document, DocumentCreate, DocumentUpdate]):
         user_id: str,
         skip: int = 0,
         limit: int = 100,
-        doc_type: Optional[DocumentType] = None
+        doc_type: Optional[DocumentType] = None,
+        tag_id: Optional[int] = None
     ) -> List[Document]:
-        """Get all documents for a user with type filtering."""
+        """Get all documents for a user with type and tag filtering."""
         try:
             query = db.query(self.model).filter(Document.user_id == user_id)
             
             if doc_type:
                 query = query.filter(Document.type == doc_type)
+                
+            if tag_id:
+                query = query.filter(Document.tags.any(Tag.id == tag_id))
             
             return (
                 query.order_by(desc(Document.uploaded_at))

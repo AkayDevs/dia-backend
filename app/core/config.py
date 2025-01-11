@@ -121,6 +121,9 @@ class Settings(BaseSettings):
     CACHE_DEFAULT_TIMEOUT: int = 300
     CACHE_KEY_PREFIX: str = "dia_cache:"
 
+    # Archive settings
+    ARCHIVE_RETENTION_DAYS: int = 30  # Number of days to keep archived files before cleanup
+
     class Config:
         case_sensitive = True
         env_file = ".env"

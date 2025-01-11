@@ -1,4 +1,4 @@
-from sqlalchemy import String, Integer, DateTime, Enum, ForeignKey, Index, Table, Column
+from sqlalchemy import String, Integer, DateTime, Enum, ForeignKey, Index, Table, Column, Boolean
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from typing import List, TYPE_CHECKING
@@ -45,6 +45,21 @@ class Document(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     type: Mapped[DocumentType] = mapped_column(Enum(DocumentType), nullable=False)
+    size: Mapped[int] = mapped_column(Integer, nullable=False)
+    url: Mapped[str] = mapped_column(String, nullable=False)
+    archived_at: Mapped[DateTime] = Column(DateTime(timezone=True), nullable=True)
+    is_archived: Mapped[bool] = Column(Boolean, default=False, nullable=False)
+    previous_version_id: Mapped[str] = Column(String, ForeignKey("documents.id"), nullable=True)
+    analysis_results = relationship("AnalysisResult", back_populates="document", cascade="all, delete-orphan")
+    tags = relationship("Tag", secondary="document_tags", back_populates="documents")
+    previous_version = relationship("Document", remote_side=[id], uselist=False)
+
+
+    user_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False
+    )
     uploaded_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -56,21 +71,12 @@ class Document(Base):
         onupdate=func.now(),
         nullable=False
     )
-    size: Mapped[int] = mapped_column(Integer, nullable=False)  # Size in bytes
-    url: Mapped[str] = mapped_column(String, nullable=False)
-    
-    # User relationship
-    user_id: Mapped[str] = mapped_column(
-        String,
-        ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False
-    )
+    # Relationships
     user: Mapped["User"] = relationship(
         "User",
         back_populates="documents",
         lazy="selectin"
     )
-    
     # Analysis results relationship
     analysis_results: Mapped[List["AnalysisResult"]] = relationship(
         "AnalysisResult",
@@ -78,7 +84,6 @@ class Document(Base):
         cascade="all, delete-orphan",
         lazy="selectin"
     )
-
     # Tags relationship
     tags: Mapped[List["Tag"]] = relationship(
         "Tag",
