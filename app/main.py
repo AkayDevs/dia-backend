@@ -4,6 +4,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
+from app.core.logging_config import setup_logging, RequestLogContext
 from app.api.v1.routes import auth, health, documents, users, analysis
 from app.core.admin import setup_admin
 from app.db.session import engine, SessionLocal
@@ -15,24 +16,47 @@ from slowapi.errors import RateLimitExceeded
 import uvicorn
 import os
 import logging
+import uuid
+from starlette.middleware.base import BaseHTTPMiddleware
+from typing import Callable
 
-# Get the root logger
-logger = logging.getLogger()
-
-# Remove any existing handlers
-for handler in logger.handlers[:]:
-    logger.removeHandler(handler)
-
-# Let uvicorn handle the logging configuration
-# This ensures logging respects the --log-level argument
+# Initialize logging
+setup_logging(env_mode=os.getenv("ENV", "development"))
+logger = logging.getLogger("app")
 
 # Initialize rate limiter
 limiter = Limiter(key_func=get_remote_address)
+
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: Callable):
+        request_id = str(uuid.uuid4())
+        path = request.url.path
+        method = request.method
+        
+        # Get user_id if available
+        user_id = None
+        if hasattr(request.state, "user"):
+            user_id = str(request.state.user.id)
+
+        with RequestLogContext(request_id, user_id):
+            logger = logging.getLogger("app.access")
+            logger.info(f"Started {method} {path}")
+            
+            try:
+                response = await call_next(request)
+                logger.info(f"Completed {method} {path} - Status: {response.status_code}")
+                return response
+            except Exception as e:
+                logger.error(f"Error processing {method} {path} - Error: {str(e)}")
+                raise
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
     openapi_url=f"{settings.API_V1_STR}/openapi.json"
 )
+
+# Add request logging middleware
+app.add_middleware(RequestLoggingMiddleware)
 
 # Set all CORS enabled origins
 app.add_middleware(

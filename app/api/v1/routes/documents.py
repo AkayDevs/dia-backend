@@ -192,15 +192,34 @@ async def upload_document(
     Raises:
         HTTPException: If file validation or upload fails
     """
-    doc_create, _ = await validate_and_save_file(
-        file, str(current_user.id), background_tasks
-    )
-    
-    return crud_document.create_with_user(
-        db=db,
-        obj_in=doc_create,
-        user_id=str(current_user.id)
-    )
+    try:
+        logger.info(f"Processing document upload: {file.filename}", extra={
+            "user_id": str(current_user.id),
+            "file_size": file.size,
+            "content_type": file.content_type
+        })
+
+        doc_create, _ = await validate_and_save_file(
+            file, str(current_user.id), background_tasks
+        )
+        
+        document = crud_document.create_with_user(
+            db=db,
+            obj_in=doc_create,
+            user_id=str(current_user.id)
+        )
+        
+        logger.info(f"Successfully created document: {file.filename}", extra={
+            "user_id": str(current_user.id),
+            "document_id": str(document.id)
+        })
+        return document
+    except Exception as e:
+        logger.error(f"Failed to create document: {file.filename}", extra={
+            "user_id": str(current_user.id),
+            "error": str(e)
+        })
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("", response_model=List[Document])
@@ -256,17 +275,34 @@ async def get_document(
     Raises:
         HTTPException: If document is not found
     """
-    document = crud_document.get_document_with_results(
-        db=db,
-        document_id=document_id,
-        user_id=str(current_user.id),
-    )
-    if not document:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found"
+    try:
+        logger.debug(f"Fetching document: {document_id}", extra={
+            "user_id": str(current_user.id)
+        })
+        
+        document = crud_document.get_document_with_results(
+            db=db,
+            document_id=document_id,
+            user_id=str(current_user.id),
         )
-    return document
+        if not document:
+            logger.warning(f"Document not found: {document_id}", extra={
+                "user_id": str(current_user.id)
+            })
+            raise HTTPException(status_code=404, detail="Document not found")
+            
+        logger.info(f"Successfully retrieved document: {document_id}", extra={
+            "user_id": str(current_user.id)
+        })
+        return document
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving document: {document_id}", extra={
+            "user_id": str(current_user.id),
+            "error": str(e)
+        })
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.delete("/{document_id}")
