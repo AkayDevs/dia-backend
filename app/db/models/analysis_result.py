@@ -4,8 +4,9 @@ from sqlalchemy.types import DateTime
 from sqlalchemy import func
 
 from app.db.base_class import Base
-from app.schemas.analysis import AnalysisType, AnalysisStatus
-from typing import TYPE_CHECKING, Dict, Any
+from app.enums.analysis import AnalysisType, AnalysisStatus, AnalysisMode
+from app.enums.table_analysis import TableAnalysisStep
+from typing import TYPE_CHECKING, Dict, Any, Optional
 import uuid
 
 if TYPE_CHECKING:
@@ -13,6 +14,12 @@ if TYPE_CHECKING:
 
 
 class AnalysisResult(Base):
+    """
+    Model for storing analysis results.
+    
+    In automatic mode, step_results contains all results at once.
+    In step-by-step mode, step_results contains results for each step separately.
+    """
     __tablename__ = "analysis_results"
 
     id: Mapped[str] = mapped_column(
@@ -37,11 +44,6 @@ class AnalysisResult(Base):
         default=AnalysisStatus.PENDING,
         nullable=False,
         index=True
-    )
-    result: Mapped[Dict[str, Any] | None] = mapped_column(
-        JSON,
-        nullable=True,
-        default=None
     )
     error: Mapped[str | None] = mapped_column(
         String,
@@ -72,6 +74,25 @@ class AnalysisResult(Base):
         nullable=True
     )
     
+    # Fields for granular analysis
+    mode: Mapped[AnalysisMode] = mapped_column(
+        Enum(AnalysisMode),
+        default=AnalysisMode.AUTOMATIC,
+        nullable=False,
+        index=True
+    )
+    current_step: Mapped[str | None] = mapped_column(
+        String,  # Using String to support different step types for different analyses
+        nullable=True,
+        index=True
+    )
+    step_results: Mapped[Dict[str, Any]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+        comment="Stores analysis results and status for each step. Format: {step_name: {status, result, created_at, completed_at, error, accuracy}}"
+    )
+    
     # Relationships
     document: Mapped["Document"] = relationship(
         "Document",
@@ -83,4 +104,8 @@ class AnalysisResult(Base):
     __table_args__ = (
         # Index for getting all analysis results for a document
         Index('ix_analysis_results_document_id_type', document_id, type),
+        # Index for filtering by mode and status
+        Index('ix_analysis_results_mode_status', mode, status),
+        # Index for step-based queries
+        Index('ix_analysis_results_current_step', current_step),
     ) 

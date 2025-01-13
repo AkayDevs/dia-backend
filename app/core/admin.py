@@ -267,19 +267,31 @@ class DocumentAdmin(ModelView, model=Document):
         Document.updated_at,
         Document.size,
         Document.user_id,
-        'tags'
+        'tags',
+        Document.is_archived,
+        Document.archived_at,
+        Document.retention_until
     ]
-    column_searchable_list = [Document.name, Document.user_id]
+    column_searchable_list = [
+        Document.name,
+        Document.user_id,
+        Document.previous_version_id
+    ]
     column_sortable_list = [
         Document.uploaded_at,
         Document.updated_at,
         Document.name,
-        Document.size
+        Document.size,
+        Document.is_archived,
+        Document.archived_at,
+        Document.retention_until
     ]
     column_formatters = {
         Document.type: lambda m, a: f"<span class='badge badge-info'>{m.type.value}</span>",
         Document.size: lambda m, a: f"{m.size / 1024:.2f} KB",
-        'tags': lambda m, a: ", ".join([f"<span class='badge badge-secondary'>{tag.name}</span>" for tag in m.tags])
+        'tags': lambda m, a: ", ".join([f"<span class='badge badge-secondary'>{tag.name}</span>" for tag in m.tags]),
+        Document.is_archived: lambda m, a: "✓" if m.is_archived else "✗",
+        Document.previous_version_id: lambda m, a: f"<a href='/admin/document/{m.previous_version_id}'>{m.previous_version_id}</a>" if m.previous_version_id else "-"
     }
     
     column_descriptions = {
@@ -289,15 +301,21 @@ class DocumentAdmin(ModelView, model=Document):
         Document.updated_at: "Last update date",
         Document.size: "File size in bytes",
         Document.user_id: "Owner user ID",
-        'tags': "Document tags"
+        'tags': "Document tags",
+        Document.previous_version_id: "ID of the previous version of this document",
+        Document.is_archived: "Whether the document is archived",
+        Document.archived_at: "When the document was archived",
+        Document.retention_until: "Date until which the document must be retained"
     }
     
     can_create = False
     can_delete = False
-    can_edit = True  # Allow editing for tags
+    can_edit = True  # Allow editing for tags and archive status
     form_columns = [
         Document.name,
-        'tags'
+        'tags',
+        Document.is_archived,
+        Document.retention_until
     ]
     
     page_size = settings.ADMIN_PAGE_SIZE
@@ -313,7 +331,9 @@ class AnalysisResultAdmin(ModelView, model=AnalysisResult):
         AnalysisResult.id,
         AnalysisResult.document_id,
         AnalysisResult.type,
+        AnalysisResult.mode,
         AnalysisResult.status,
+        AnalysisResult.current_step,
         AnalysisResult.progress,
         AnalysisResult.created_at,
         AnalysisResult.completed_at
@@ -321,31 +341,38 @@ class AnalysisResultAdmin(ModelView, model=AnalysisResult):
     column_searchable_list = [
         AnalysisResult.document_id,
         AnalysisResult.status,
-        AnalysisResult.type
+        AnalysisResult.type,
+        AnalysisResult.mode,
+        AnalysisResult.current_step
     ]
     column_sortable_list = [
         AnalysisResult.created_at,
         AnalysisResult.completed_at,
         AnalysisResult.type,
+        AnalysisResult.mode,
         AnalysisResult.status,
         AnalysisResult.progress
     ]
     column_formatters = {
         AnalysisResult.type: lambda m, a: f"<span class='badge badge-info'>{m.type.value}</span>",
+        AnalysisResult.mode: lambda m, a: f"<span class='badge badge-primary'>{m.mode.value}</span>",
         AnalysisResult.status: lambda m, a: f"<span class='badge badge-{_get_status_badge(m.status)}'>{m.status.value}</span>",
-        AnalysisResult.progress: lambda m, a: f"<div class='progress'><div class='progress-bar' role='progressbar' style='width: {m.progress}%' aria-valuenow='{m.progress}' aria-valuemin='0' aria-valuemax='100'>{m.progress}%</div></div>"
+        AnalysisResult.progress: lambda m, a: f"<div class='progress'><div class='progress-bar' role='progressbar' style='width: {m.progress}%' aria-valuenow='{m.progress}' aria-valuemin='0' aria-valuemax='100'>{m.progress}%</div></div>",
+        AnalysisResult.current_step: lambda m, a: f"<span class='badge badge-secondary'>{m.current_step}</span>" if m.current_step else "-"
     }
     
     column_descriptions = {
         AnalysisResult.document_id: "Associated document ID",
         AnalysisResult.type: "Type of analysis performed",
+        AnalysisResult.mode: "Analysis execution mode (automatic/step-by-step)",
         AnalysisResult.status: "Current status of the analysis",
+        AnalysisResult.current_step: "Current step in granular analysis",
         AnalysisResult.progress: "Analysis progress (0-100%)",
         AnalysisResult.status_message: "Current status message",
         AnalysisResult.error: "Error message if analysis failed",
         AnalysisResult.created_at: "When analysis was started",
         AnalysisResult.completed_at: "When analysis was completed",
-        AnalysisResult.result: "Analysis results (JSON)",
+        AnalysisResult.step_results: "Results for each analysis step (JSON)",
         AnalysisResult.parameters: "Analysis parameters (JSON)"
     }
     
@@ -353,12 +380,14 @@ class AnalysisResultAdmin(ModelView, model=AnalysisResult):
         AnalysisResult.id,
         AnalysisResult.document_id,
         AnalysisResult.type,
+        AnalysisResult.mode,
         AnalysisResult.status,
+        AnalysisResult.current_step,
         AnalysisResult.progress,
         AnalysisResult.status_message,
         AnalysisResult.error,
         AnalysisResult.parameters,
-        AnalysisResult.result,
+        AnalysisResult.step_results,
         AnalysisResult.created_at,
         AnalysisResult.completed_at
     ]
