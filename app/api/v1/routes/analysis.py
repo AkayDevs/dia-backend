@@ -1,469 +1,349 @@
-from typing import Any, List, Optional, Dict
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status, Query
+from typing import List, Optional, Dict, Any
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from sqlalchemy.orm import Session
 import logging
-from datetime import datetime
-
-from app.core.auth import get_current_active_verified_user
-from app.db import deps
 from app.db.models.user import User
-from app.db.models.document import Document
+from app.db import deps
 from app.schemas.analysis import (
     AnalysisRequest,
     AnalysisResult,
-    AnalysisType,
-    AnalysisStatus,
-    AnalysisParameters,
     BatchAnalysisRequest,
     BatchAnalysisResponse,
-    BatchAnalysisError
+    BatchAnalysisError,
+    StepApprovalRequest
 )
+from app.enums.analysis import AnalysisMode, AnalysisStatus, AnalysisType
 from app.services.analysis import AnalysisOrchestrator
-from app.exceptions import DocumentNotFoundError
+from app.crud.crud_analysis import analysis_result as crud_analysis
 from app.crud.crud_document import document as crud_document
 
 router = APIRouter()
-logger = logging.getLogger("app.api.analysis")
+logger = logging.getLogger(__name__)
 
-
-@router.get("/", response_model=List[AnalysisResult])
-async def list_user_analyses(
-    analysis_type: Optional[AnalysisType] = None,
-    status: Optional[AnalysisStatus] = None,
-    document_id: Optional[str] = None,
-    start_date: Optional[str] = Query(None, description="Filter analyses after this date (YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="Filter analyses before this date (YYYY-MM-DD)"),
-    skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
-    db: Session = Depends(deps.get_db),
-    current_user: User = Depends(get_current_active_verified_user),
-) -> Any:
-    """
-    List all analyses for the current user with optional filtering.
-    
-    Parameters:
-    - analysis_type: Filter by type of analysis
-    - status: Filter by analysis status
-    - document_id: Filter by specific document
-    - start_date: Filter analyses after this date (YYYY-MM-DD)
-    - end_date: Filter analyses before this date (YYYY-MM-DD)
-    - skip: Number of records to skip (pagination)
-    - limit: Maximum number of records to return
-    """
-    logger.info(f"Listing analyses for user: {current_user.id}")
-    
-    try:
-        analysis_orchestrator = AnalysisOrchestrator(db)
-        
-        # Get user's documents
-        documents = db.query(Document).filter(
-            Document.user_id == current_user.id
-        )
-        if document_id:
-            documents = documents.filter(Document.id == document_id)
-        
-        document_ids = [doc.id for doc in documents.all()]
-        
-        if not document_ids:
-            return []
-
-        all_analyses = []
-        for doc_id in document_ids:
-            # Use existing get_document_analyses method for each document
-            analyses = analysis_orchestrator.get_document_analyses(
-                document_id=doc_id,
-                analysis_type=analysis_type,
-                status=status,
-                skip=0,  # We'll handle pagination after combining results
-                limit=None  # Get all for this document
-            )
-            all_analyses.extend(analyses)
-
-        # Apply date filters if provided
-        if start_date:
-            start_datetime = datetime.strptime(start_date, "%Y-%m-%d")
-            all_analyses = [a for a in all_analyses if a.created_at >= start_datetime]
-        
-        if end_date:
-            end_datetime = datetime.strptime(end_date, "%Y-%m-%d")
-            all_analyses = [a for a in all_analyses if a.created_at <= end_datetime]
-
-        # Sort by created_at descending
-        all_analyses.sort(key=lambda x: x.created_at, reverse=True)
-
-        # Apply pagination
-        return all_analyses[skip:skip + limit]
-
-    except ValueError as e:
-        logger.error(f"Validation error in list_user_analyses: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-    except Exception as e:
-        logger.error(f"Error listing user analyses: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error retrieving analysis results"
-        ) 
-
-
-@router.get("/types", response_model=List[dict])
-async def list_analysis_types(
-    db: Session = Depends(deps.get_db),
-    current_user: User = Depends(get_current_active_verified_user)
-) -> Any:
-    """
-    List all available analysis types with their parameters.
-    Any logged-in user can access this endpoint.
-    """
-    logger.info(f"User {current_user.id} listing available analysis types")
-    
-    try:
-        # Create orchestrator to access factories
-        analysis_orchestrator = AnalysisOrchestrator(db)
-        
-        # Build response for each analysis type
-        analysis_types = []
-        for analysis_type in AnalysisType:
-            try:
-                # Get factory instance
-                factory = analysis_orchestrator._get_factory(analysis_type)
-                if not factory:
-                    logger.info(f"Factory not found for {analysis_type}")
-                    continue
-                
-                # Get description and supported formats directly from factory
-                description = factory.get_description()
-                supported_formats = list(factory.supported_formats)
-                
-                # Get parameters using orchestrator
-                try:
-                    parameters = analysis_orchestrator.get_supported_parameters(analysis_type)
-                except ValueError as e:
-                    logger.warning(f"Error getting parameters for {analysis_type}: {str(e)}")
-                    continue
-                
-                analysis_types.append({
-                    "type": analysis_type,
-                    "name": analysis_type.value.replace("_", " ").title(),
-                    "description": description,
-                    "supported_formats": supported_formats,
-                    "parameters": parameters
-                })
-                
-            except Exception as e:
-                logger.warning(f"Error getting info for analysis type {analysis_type}: {str(e)}")
-                continue
-        
-        return analysis_types
-        
-    except Exception as e:
-        logger.error(f"Error listing analysis types: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error retrieving analysis types"
-        )
-
-
-@router.post("/batch", response_model=BatchAnalysisResponse)
-async def create_batch_analysis(
-    *,
-    batch_request: BatchAnalysisRequest,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(deps.get_db),
-    current_user: User = Depends(get_current_active_verified_user),
-) -> Any:
-    """Create multiple analysis tasks for multiple documents."""
-    logger.info(f"Creating batch analysis for {len(batch_request.documents)} documents")
-    
-    analysis_orchestrator = AnalysisOrchestrator(db)
-    results = []
-    errors = []
-
-    for doc_request in batch_request.documents:
-        try:
-            # Verify document ownership using CRUD helper
-            document = crud_document.get_document_with_results(
-                db,
-                document_id=doc_request.document_id,
-                user_id=current_user.id
-            )
-            
-            if not document:
-                raise DocumentNotFoundError(f"Document not found: {doc_request.document_id}")
-
-            
-            
-            # Validate parameters
-            analysis_orchestrator.validate_parameters(
-                doc_request.analysis_type,
-                document.type,
-                doc_request.parameters
-            )
-
-            # Create analysis task
-            analysis = await analysis_orchestrator.start_analysis(
-                document_id=doc_request.document_id,
-                analysis_type=doc_request.analysis_type,
-                parameters=doc_request.parameters
-            )
-            
-            # Schedule processing
-            background_tasks.add_task(
-                analysis_orchestrator.process_analysis,
-                analysis.id
-            )
-            
-            results.append(analysis)
-            
-        except DocumentNotFoundError as e:
-            errors.append(BatchAnalysisError(
-                document_id=doc_request.document_id,
-                error=str(e)
-            ))
-        except ValueError as e:
-            errors.append(BatchAnalysisError(
-                document_id=doc_request.document_id,
-                error=f"Parameter validation failed: {str(e)}"
-            ))
-        except Exception as e:
-            logger.error(f"Error processing document {doc_request.document_id}: {str(e)}")
-            errors.append(BatchAnalysisError(
-                document_id=doc_request.document_id,
-                error="Internal server error"
-            ))
-
-    if errors and not results:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"message": "All analysis requests failed", "errors": errors}
-        )
-
-    return BatchAnalysisResponse(
-        results=results,
-        errors=errors if errors else None,
-        total_submitted=len(results),
-        total_failed=len(errors)
-    )
-
-
-@router.post("/{document_id}", response_model=AnalysisResult)
-async def create_analysis(
-    *,
+@router.post("/{document_id}/analyze", response_model=AnalysisResult)
+async def analyze_document(
     document_id: str,
-    analysis_request: AnalysisRequest,
+    request: AnalysisRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(deps.get_db),
-    current_user: User = Depends(get_current_active_verified_user),
-) -> Any:
+    current_user: User = Depends(deps.get_current_active_verified_user)
+) -> AnalysisResult:
     """
-    Create a new analysis task for a document.
+    Start analysis on a document.
+    
+    Args:
+        document_id: ID of document to analyze
+        request: Analysis request details
+        background_tasks: FastAPI background tasks
+        db: Database session
+        current_user: Current user
+        
+    Returns:
+        AnalysisResult: Created analysis task
     """
-    logger.info(f"Creating analysis - Document: {document_id}, Type: {analysis_request.analysis_type}")
-    
-    # Verify document ownership
-    document = db.query(Document).filter(
-        Document.id == document_id,
-        Document.user_id == current_user.id
-    ).first()
-    
-    if not document:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found"
-        )
-    
     try:
-        # Create analysis orchestrator
-        analysis_orchestrator = AnalysisOrchestrator(db)
+        # Verify document exists and user has access
+        document = crud_document.get(db, id=document_id)
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+        if document.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to access this document")
+
+        # Create orchestrator
+        orchestrator = AnalysisOrchestrator(db)
         
-        # Get supported parameters for validation
-        supported_params = analysis_orchestrator.get_supported_parameters(
-            analysis_request.analysis_type
-        )
-        
-        # Validate parameters
-        analysis_orchestrator.validate_parameters(
-            analysis_request.analysis_type,
-            document.type,
-            analysis_request.parameters
-        )
-        
-        # Create analysis task
-        analysis = await analysis_orchestrator.start_analysis(
+        # Start analysis
+        analysis = await orchestrator.start_analysis(
             document_id=document_id,
-            analysis_type=analysis_request.analysis_type,
-            parameters=analysis_request.parameters
+            analysis_type=request.analysis_type,
+            parameters=request.parameters
         )
         
-        # Schedule processing
-        background_tasks.add_task(
-            analysis_orchestrator.process_analysis,
-            analysis.id
-        )
+        # Process analysis in background if automatic mode
+        if request.mode == AnalysisMode.AUTOMATIC:
+            background_tasks.add_task(
+                orchestrator.process_analysis,
+                analysis_id=analysis.id
+            )
         
         return analysis
-        
-    except ValueError as e:
-        logger.error(f"Validation error: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+
     except Exception as e:
-        logger.error(f"Error creating analysis: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error creating analysis task"
+        logger.error(f"Error starting analysis: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{document_id}/analysis/{analysis_id}/step", response_model=AnalysisResult)
+async def execute_analysis_step(
+    document_id: str,
+    analysis_id: str,
+    step: Optional[str] = None,
+    step_parameters: Optional[Dict[str, Any]] = None,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_verified_user)
+) -> AnalysisResult:
+    """
+    Execute a specific step of an analysis.
+    
+    Args:
+        document_id: ID of document
+        analysis_id: ID of analysis
+        step: Optional specific step to execute
+        step_parameters: Optional parameters for the step
+        db: Database session
+        current_user: Current user
+        
+    Returns:
+        AnalysisResult: Updated analysis task
+    """
+    try:
+        # Verify document exists and user has access
+        document = crud_document.get(db, id=document_id)
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+        if document.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to access this document")
+
+        # Verify analysis exists
+        analysis = crud_analysis.get(db, id=analysis_id)
+        if not analysis:
+            raise HTTPException(status_code=404, detail="Analysis not found")
+        if analysis.document_id != document_id:
+            raise HTTPException(status_code=400, detail="Analysis does not belong to document")
+
+        # Create orchestrator
+        orchestrator = AnalysisOrchestrator(db)
+        
+        # Execute step
+        await orchestrator.process_analysis(
+            analysis_id=analysis_id,
+            step=step,
+            step_parameters=step_parameters
         )
+        
+        # Get updated analysis
+        updated_analysis = crud_analysis.get(db, id=analysis_id)
+        return updated_analysis
 
+    except Exception as e:
+        logger.error(f"Error executing analysis step: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/document/{document_id}", response_model=List[AnalysisResult])
-async def list_document_analyses(
+@router.post("/{document_id}/analysis/{analysis_id}/approve", response_model=AnalysisResult)
+async def approve_analysis_step(
+    document_id: str,
+    analysis_id: str,
+    approval: StepApprovalRequest,
+    modifications: Optional[Dict[str, Any]] = None,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_verified_user)
+) -> AnalysisResult:
+    """
+    Approve or reject a step in the analysis process.
+    
+    Args:
+        document_id: ID of document
+        analysis_id: ID of analysis
+        approval: Step approval details
+        modifications: Optional modifications to the step results
+        db: Database session
+        current_user: Current user
+        
+    Returns:
+        AnalysisResult: Updated analysis task
+    """
+    try:
+        # Verify document exists and user has access
+        document = crud_document.get(db, id=document_id)
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+        if document.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to access this document")
+
+        # Verify analysis exists
+        analysis = crud_analysis.get(db, id=analysis_id)
+        if not analysis:
+            raise HTTPException(status_code=404, detail="Analysis not found")
+        if analysis.document_id != document_id:
+            raise HTTPException(status_code=400, detail="Analysis does not belong to document")
+        if analysis.status != AnalysisStatus.WAITING_FOR_APPROVAL:
+            raise HTTPException(status_code=400, detail="Analysis step not waiting for approval")
+
+        # Create orchestrator
+        orchestrator = AnalysisOrchestrator(db)
+        
+        # Process approval
+        updated_analysis = await orchestrator.process_step_approval(
+            analysis_id=analysis_id,
+            approval=approval,
+            modifications=modifications
+        )
+        
+        return updated_analysis
+
+    except Exception as e:
+        logger.error(f"Error processing step approval: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{document_id}/analysis", response_model=List[AnalysisResult])
+async def list_analyses(
     document_id: str,
     analysis_type: Optional[AnalysisType] = None,
     status: Optional[AnalysisStatus] = None,
+    mode: Optional[AnalysisMode] = None,
     skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(10, ge=1, le=100),
     db: Session = Depends(deps.get_db),
-    current_user: User = Depends(get_current_active_verified_user),
-) -> Any:
+    current_user: User = Depends(deps.get_current_active_verified_user)
+) -> List[AnalysisResult]:
     """
-    List all analyses for a document with optional filtering.
+    List analyses for a document.
+    
+    Args:
+        document_id: ID of document
+        analysis_type: Optional filter by analysis type
+        status: Optional filter by status
+        mode: Optional filter by mode
+        skip: Number of records to skip
+        limit: Maximum number of records to return
+        db: Database session
+        current_user: Current user
+        
+    Returns:
+        List[AnalysisResult]: List of analysis tasks
     """
-    logger.info(f"Listing analyses for document: {document_id}")
-    
-    # Verify document ownership
-    document = db.query(Document).filter(
-        Document.id == document_id,
-        Document.user_id == current_user.id
-    ).first()
-    
-    if not document:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found"
-        )
-    
     try:
-        # Get analyses with filters
-        analysis_orchestrator = AnalysisOrchestrator(db)
-        return analysis_orchestrator.get_document_analyses(
-            document_id=document_id,
-            analysis_type=analysis_type,
-            status=status,
+        # Verify document exists and user has access
+        document = crud_document.get(db, id=document_id)
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+        if document.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to access this document")
+
+        # Build filters
+        filters = {"document_id": document_id}
+        if analysis_type:
+            filters["type"] = analysis_type
+        if status:
+            filters["status"] = status
+        if mode:
+            filters["mode"] = mode
+
+        # Get analyses
+        analyses = crud_analysis.get_multi(
+            db,
             skip=skip,
-            limit=limit
+            limit=limit,
+            filters=filters
         )
+        
+        return analyses
+
     except Exception as e:
         logger.error(f"Error listing analyses: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error retrieving analysis results"
-        )
+        raise HTTPException(status_code=500, detail=str(e))
 
-
-@router.get("/{analysis_id}", response_model=AnalysisResult)
+@router.get("/{document_id}/analysis/{analysis_id}", response_model=AnalysisResult)
 async def get_analysis(
+    document_id: str,
     analysis_id: str,
     db: Session = Depends(deps.get_db),
-    current_user: User = Depends(get_current_active_verified_user),
-) -> Any:
+    current_user: User = Depends(deps.get_current_active_verified_user)
+) -> AnalysisResult:
     """
-    Get a specific analysis result.
-    """
-    logger.info(f"Fetching analysis: {analysis_id}")
+    Get details of a specific analysis.
     
+    Args:
+        document_id: ID of document
+        analysis_id: ID of analysis
+        db: Database session
+        current_user: Current user
+        
+    Returns:
+        AnalysisResult: Analysis task details
+    """
     try:
-        analysis_orchestrator = AnalysisOrchestrator(db)
-        analysis = analysis_orchestrator.get_analysis(analysis_id)
-        
-        if not analysis:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Analysis not found"
-            )
-        
-        # Verify document ownership
-        document = db.query(Document).filter(
-            Document.id == analysis.document_id,
-            Document.user_id == current_user.id
-        ).first()
-        
+        # Verify document exists and user has access
+        document = crud_document.get(db, id=document_id)
         if not document:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Analysis not found"
-            )
+            raise HTTPException(status_code=404, detail="Document not found")
+        if document.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to access this document")
+
+        # Get analysis
+        analysis = crud_analysis.get(db, id=analysis_id)
+        if not analysis:
+            raise HTTPException(status_code=404, detail="Analysis not found")
+        if analysis.document_id != document_id:
+            raise HTTPException(status_code=400, detail="Analysis does not belong to document")
         
         return analysis
-    except HTTPException:
-        raise
+
     except Exception as e:
-        logger.error(f"Error fetching analysis: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error retrieving analysis result"
-        )
+        logger.error(f"Error getting analysis: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-
-@router.get("/types/{analysis_type}/parameters")
-async def get_analysis_parameters(
-    analysis_type: AnalysisType,
-    db: Session = Depends(deps.get_db)
-) -> Dict[str, Any]:
-    """Get supported parameters for an analysis type."""
-    try:
-        analysis_orchestrator = AnalysisOrchestrator(db)
-        return analysis_orchestrator.get_supported_parameters(analysis_type)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-
-
-@router.delete("/{analysis_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_analysis(
-    analysis_id: str,
+@router.post("/batch", response_model=BatchAnalysisResponse)
+async def batch_analyze(
+    request: BatchAnalysisRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(deps.get_db),
-    current_user: User = Depends(get_current_active_verified_user),
-) -> None:
+    current_user: User = Depends(deps.get_current_active_verified_user)
+) -> BatchAnalysisResponse:
     """
-    Delete a specific analysis result.
-    """
-    logger.info(f"Deleting analysis: {analysis_id}")
+    Start batch analysis on multiple documents.
     
+    Args:
+        request: Batch analysis request details
+        background_tasks: FastAPI background tasks
+        db: Database session
+        current_user_id: ID of current user
+        
+    Returns:
+        BatchAnalysisResponse: Results of batch submission
+    """
     try:
-        analysis_orchestrator = AnalysisOrchestrator(db)
-        analysis = analysis_orchestrator.get_analysis(analysis_id)
+        orchestrator = AnalysisOrchestrator(db)
+        results = []
+        errors = []
         
-        if not analysis:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Analysis not found"
-            )
+        for doc in request.documents:
+            try:
+                # Verify document exists and user has access
+                document = crud_document.get(db, id=doc.document_id)
+                if not document:
+                    raise ValueError("Document not found")
+                if document.user_id != current_user.id:
+                    raise ValueError("Not authorized to access this document")
+
+                # Start analysis
+                analysis = await orchestrator.start_analysis(
+                    document_id=doc.document_id,
+                    analysis_type=doc.analysis_type,
+                    parameters=doc.parameters
+                )
+                
+                # Process in background if automatic mode
+                if doc.parameters.get("mode", AnalysisMode.AUTOMATIC) == AnalysisMode.AUTOMATIC:
+                    background_tasks.add_task(
+                        orchestrator.process_analysis,
+                        analysis_id=analysis.id
+                    )
+                
+                results.append(analysis)
+                
+            except Exception as e:
+                errors.append(BatchAnalysisError(
+                    document_id=doc.document_id,
+                    error=str(e)
+                ))
         
-        # Verify document ownership
-        document = db.query(Document).filter(
-            Document.id == analysis.document_id,
-            Document.user_id == current_user.id
-        ).first()
-        
-        if not document:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Analysis not found"
-            )
-        
-        analysis_orchestrator.delete_analysis(analysis_id)
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting analysis: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error deleting analysis result"
+        return BatchAnalysisResponse(
+            results=results,
+            errors=errors,
+            total_submitted=len(results),
+            total_failed=len(errors)
         )
+
+    except Exception as e:
+        logger.error(f"Error in batch analysis: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

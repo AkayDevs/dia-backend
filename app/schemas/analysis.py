@@ -1,102 +1,78 @@
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from pydantic import BaseModel, Field, validator, ConfigDict
 import enum
 from datetime import datetime
+from app.enums.analysis import AnalysisMode, AnalysisStatus, AnalysisType
 
 
-class AnalysisStatus(str, enum.Enum):
-    """Status of document analysis."""
-    PENDING = "pending"
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    FAILED = "failed"
+# Step Approval Request ------------------------------------------------------------
 
+class StepApprovalRequest(BaseModel):
+    """Request for approving/rejecting a step result."""
+    step: enum.Enum
+    action: Literal["approve", "reject"]
+    feedback: Optional[Dict[str, Any]] = None
+    modifications: Optional[Dict[str, Any]] = None
 
-class AnalysisType(str, enum.Enum):
-    """Types of analysis supported by the system."""
-    TABLE_DETECTION = "table_detection"
-    TEXT_EXTRACTION = "text_extraction"
-    TEXT_SUMMARIZATION = "text_summarization"
-    TEMPLATE_CONVERSION = "template_conversion"
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "step": "detection",
+                "action": "approve",
+                "feedback": {
+                    "comment": "Tables detected correctly"
+                },
+                "modifications": {
+                    "remove_tables": [0, 2],
+                    "adjust_coordinates": {
+                        "1": {"x1": 100, "y1": 200, "x2": 300, "y2": 400}
+                    }
+                }
+            }
+        }
+    )
 
+# Analysis parameters ------------------------------------------------------------
 
 class AnalysisParameters(BaseModel):
     """Base parameters for all analysis types."""
-    confidence_threshold: float = Field(
-        default=0.5,
+    mode: Optional[AnalysisMode] = Field(
+        default=AnalysisMode.AUTOMATIC,
+        description="Analysis execution mode"
+    )
+    step_parameters: Optional[Dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Step-specific parameters for granular analysis"
+    )
+    confidence_threshold: Optional[float] = Field(
+        default=0.7,
         ge=0.0,
         le=1.0,
-        description="Minimum confidence score to consider a detection valid"
+        description="Minimum confidence threshold for results"
     )
     max_results: Optional[int] = Field(
         default=None,
-        ge=1,
+        gt=0,
         description="Maximum number of results to return"
     )
 
-    model_config = ConfigDict(extra="allow")
-
-
-class TableDetectionParameters(AnalysisParameters):
-    """Parameters specific to table detection."""
-    min_row_count: Optional[int] = Field(
-        default=2,
-        ge=1,
-        description="Minimum number of rows to consider a valid table"
-    )
-    detect_headers: bool = Field(
-        default=True,
-        description="Whether to detect table headers"
-    )
-
-
-class TextExtractionParameters(AnalysisParameters):
-    """Parameters specific to text extraction."""
-    extract_layout: bool = Field(
-        default=True,
-        description="Whether to preserve document layout"
-    )
-    detect_lists: bool = Field(
-        default=True,
-        description="Whether to detect and format lists"
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "mode": "automatic",
+                "confidence_threshold": 0.7,
+                "max_results": 10,
+                "step_parameters": {
+                    "detection": {
+                        "min_table_size": 100
+                    }
+                }
+            }
+        }
     )
 
 
-class TextSummarizationParameters(AnalysisParameters):
-    """Parameters specific to text summarization."""
-    max_length: int = Field(
-        default=150,
-        ge=50,
-        le=500,
-        description="Maximum length of the summary in words"
-    )
-    min_length: int = Field(
-        default=50,
-        ge=20,
-        le=200,
-        description="Minimum length of the summary in words"
-    )
-
-    @validator("min_length")
-    def validate_min_length(cls, v, values):
-        if "max_length" in values and v >= values["max_length"]:
-            raise ValueError("min_length must be less than max_length")
-        return v
-
-
-class TemplateConversionParameters(AnalysisParameters):
-    """Parameters specific to template conversion."""
-    target_format: str = Field(
-        default="docx",
-        pattern="^(docx|pdf)$",
-        description="Target format for conversion"
-    )
-    preserve_styles: bool = Field(
-        default=True,
-        description="Whether to preserve document styles"
-    )
-
-
+# Analysis Result Schema ------------------------------------------------------------
 
 class AnalysisResultBase(BaseModel):
     """Base schema for analysis results."""
@@ -114,6 +90,9 @@ class AnalysisResult(AnalysisResultBase):
     created_at: datetime = Field(..., description="When analysis was started")
     completed_at: Optional[datetime] = Field(None, description="When analysis completed")
     progress: float = Field(default=0.0, description="Analysis progress (0.0 to 1.0)")
+    mode: Optional[AnalysisMode] = Field(None, description="Analysis execution mode")
+    current_step: Optional[str] = Field(None, description="Current step in granular analysis")
+    step_results: Optional[Dict[str, Any]] = Field(None, description="Results for each step in granular analysis")
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -122,6 +101,8 @@ class AnalysisResult(AnalysisResultBase):
         }
     )
 
+
+# Analysis Request Schema ------------------------------------------------------------
 
 def validate_analysis_parameters(parameters: Dict[str, Any], analysis_type: Optional[AnalysisType]) -> Dict[str, Any]:
     """Validate parameters based on analysis type.
@@ -136,22 +117,16 @@ def validate_analysis_parameters(parameters: Dict[str, Any], analysis_type: Opti
     if not analysis_type:
         return parameters
 
-    parameter_models = {
-        AnalysisType.TABLE_DETECTION: TableDetectionParameters,
-        AnalysisType.TEXT_EXTRACTION: TextExtractionParameters,
-        AnalysisType.TEXT_SUMMARIZATION: TextSummarizationParameters,
-        AnalysisType.TEMPLATE_CONVERSION: TemplateConversionParameters
-    }
-
-    model = parameter_models.get(analysis_type)
-    if model:
-        return model(**parameters).model_dump()
+    # parameter_model = PARAMETER_MAPPINGS.get(analysis_type)
+    # if parameter_model:
+    #     return parameter_model(**parameters).model_dump()
     return parameters
 
 
 class AnalysisRequest(BaseModel):
     """Request to perform analysis on a document."""
     analysis_type: AnalysisType = Field(..., description="Type of analysis to perform")
+    mode: Optional[AnalysisMode] = Field(default=AnalysisMode.AUTOMATIC, description="Analysis execution mode")
     parameters: Dict[str, Any] = Field(
         default_factory=dict,
         description="Analysis-specific parameters"
@@ -282,136 +257,8 @@ class BatchAnalysisResponse(BaseModel):
     )
 
 
-# Type-specific result schemas
-class BoundingBox(BaseModel):
-    """Schema for bounding box coordinates."""
-    x1: float = Field(..., description="Left coordinate")
-    y1: float = Field(..., description="Top coordinate")
-    x2: float = Field(..., description="Right coordinate")
-    y2: float = Field(..., description="Bottom coordinate")
-    
-    @validator('x2')
-    def validate_x2(cls, v, values):
-        if 'x1' in values and v < values['x1']:
-            raise ValueError("x2 must be greater than x1")
-        return v
-        
-    @validator('y2')
-    def validate_y2(cls, v, values):
-        if 'y1' in values and v < values['y1']:
-            raise ValueError("y2 must be greater than y1")
-        return v
 
-class TableCell(BaseModel):
-    """Schema for a single table cell."""
-    content: str = Field(..., description="Cell content")
-    row_index: int = Field(..., ge=0, description="Row index (0-based)")
-    col_index: int = Field(..., ge=0, description="Column index (0-based)")
-    row_span: int = Field(default=1, ge=1, description="Number of rows this cell spans")
-    col_span: int = Field(default=1, ge=1, description="Number of columns this cell spans")
-    is_header: bool = Field(default=False, description="Whether this cell is a header")
-    confidence: float = Field(
-        default=1.0,
-        ge=0.0,
-        le=1.0,
-        description="Confidence score for cell content"
-    )
-
-class DetectedTable(BaseModel):
-    """Schema for a single detected table."""
-    bbox: BoundingBox = Field(..., description="Table bounding box coordinates")
-    confidence_score: float = Field(
-        ...,
-        ge=0.0,
-        le=1.0,
-        description="Confidence score for table detection"
-    )
-    rows: int = Field(..., ge=1, description="Number of rows")
-    columns: int = Field(..., ge=1, description="Number of columns")
-    cells: List[TableCell] = Field(..., description="List of cells in the table")
-    has_headers: bool = Field(default=False, description="Whether table has header row(s)")
-    header_rows: List[int] = Field(
-        default_factory=list,
-        description="Indices of header rows (0-based)"
-    )
-
-class PageTableInfo(BaseModel):
-    """Schema for tables detected on a single page."""
-    page_number: int = Field(..., ge=1, description="Page number (1-based)")
-    page_dimensions: Optional[Dict[str, float]] = Field(
-        None,
-        description="Page dimensions (width, height) if available"
-    )
-    tables: List[DetectedTable] = Field(
-        default_factory=list,
-        description="List of tables detected on this page"
-    )
-
-class TableDetectionResult(BaseModel):
-    """Result schema for table detection."""
-    pages: List[PageTableInfo] = Field(
-        ...,
-        description="Page-wise table detection results"
-    )
-    total_tables: int = Field(
-        ...,
-        ge=0,
-        description="Total number of tables detected"
-    )
-    average_confidence: float = Field(
-        ...,
-        ge=0.0,
-        le=1.0,
-        description="Average confidence score across all detections"
-    )
-    processing_metadata: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Additional processing metadata"
-    )
-
-    @validator('average_confidence')
-    def validate_average_confidence(cls, v):
-        if not 0.0 <= v <= 1.0:
-            raise ValueError("Average confidence must be between 0.0 and 1.0")
-        return v
-
-    @validator('total_tables')
-    def validate_total_tables(cls, v, values):
-        if 'pages' in values:
-            total = sum(len(page.tables) for page in values['pages'])
-            if total != v:
-                raise ValueError("Total tables count doesn't match sum of tables in pages")
-        return v
-
-
-class TextExtractionResult(BaseModel):
-    """Result schema for text extraction."""
-    text: str = Field(..., description="Extracted text content")
-    pages: List[Dict[str, Any]] = Field(..., description="Page-wise content")
-    metadata: Dict[str, Any] = Field(..., description="Extraction metadata")
-
-    model_config = ConfigDict(extra="allow")
-
-
-class TextSummarizationResult(BaseModel):
-    """Result schema for text summarization."""
-    summary: str = Field(..., description="Generated summary")
-    original_length: int = Field(..., description="Original text length in words")
-    summary_length: int = Field(..., description="Summary length in words")
-    key_points: List[str] = Field(..., description="Extracted key points")
-
-    model_config = ConfigDict(extra="allow")
-
-
-class TemplateConversionResult(BaseModel):
-    """Result schema for template conversion."""
-    converted_file_url: str = Field(..., description="URL to converted file")
-    original_format: str = Field(..., description="Original file format")
-    target_format: str = Field(..., description="Target file format")
-    conversion_metadata: Dict[str, Any] = Field(..., description="Conversion metadata")
-
-    model_config = ConfigDict(extra="allow")
-
+# Analysis Result Create Schema ------------------------------------------------------------
 
 class AnalysisResultCreate(BaseModel):
     """Schema for creating a new analysis result."""
@@ -431,6 +278,8 @@ class AnalysisResultCreate(BaseModel):
     )
 
 
+# Analysis Result Update Schema ------------------------------------------------------------
+
 class AnalysisResultUpdate(BaseModel):
     """Schema for updating an existing analysis result."""
     result: Optional[Dict[str, Any]] = Field(None, description="Updated analysis results")
@@ -447,4 +296,4 @@ class AnalysisResultUpdate(BaseModel):
                 "status": "completed"
             }
         }
-    ) 
+    )
