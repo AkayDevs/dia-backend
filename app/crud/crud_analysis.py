@@ -1,5 +1,6 @@
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from sqlalchemy.orm import Session
+from sqlalchemy import and_, or_, desc
 from fastapi.encoders import jsonable_encoder
 from datetime import datetime
 import logging
@@ -178,6 +179,65 @@ class CRUDAnalysis(CRUDBase[Analysis, AnalysisCreate, AnalysisUpdate]):
         db.commit()
         db.refresh(db_obj)
         return db_obj
+
+    def get_multi_by_filters(
+        self,
+        db: Session,
+        *,
+        filters: Dict[str, Any],
+        skip: int = 0,
+        limit: int = 100
+    ) -> List[Analysis]:
+        """
+        Get multiple analysis records with filtering options.
+        
+        Args:
+            db: Database session
+            filters: Dictionary of filter conditions
+            skip: Number of records to skip
+            limit: Maximum number of records to return
+            
+        Returns:
+            List of Analysis objects matching the filter criteria
+        """
+        query = db.query(self.model)
+        
+        # Join with Document if we need to filter by document type
+        if "document_type" in filters:
+            query = query.join(Analysis.document)
+        
+        # Build filter conditions
+        conditions = []
+        
+        if "user_id" in filters:
+            conditions.append(Analysis.document.has(user_id=filters["user_id"]))
+            
+        if "status" in filters:
+            conditions.append(Analysis.status == filters["status"])
+            
+        if "analysis_type_id" in filters:
+            conditions.append(Analysis.analysis_type_id == filters["analysis_type_id"])
+            
+        if "document_type" in filters:
+            conditions.append(Analysis.document.has(type=filters["document_type"]))
+            
+        if "start_date" in filters:
+            conditions.append(Analysis.created_at >= filters["start_date"])
+            
+        if "end_date" in filters:
+            conditions.append(Analysis.created_at <= filters["end_date"])
+            
+        # Apply all conditions
+        if conditions:
+            query = query.filter(and_(*conditions))
+            
+        # Order by creation date (newest first)
+        query = query.order_by(desc(Analysis.created_at))
+        
+        # Apply pagination
+        query = query.offset(skip).limit(limit)
+        
+        return query.all()
 
 class CRUDAnalysisStepResult(CRUDBase[AnalysisStepResult, AnalysisStepResultCreate, AnalysisStepResultUpdate]):
     def get_by_analysis(

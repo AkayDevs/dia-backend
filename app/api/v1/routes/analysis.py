@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Query
 from sqlalchemy.orm import Session
 import logging
 from datetime import datetime
@@ -18,6 +18,7 @@ from app.schemas.analysis import (
 )
 from app.db.models.user import User
 from app.core.analysis import AnalysisOrchestrator
+from app.schemas.document import DocumentType
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -287,3 +288,59 @@ async def update_step_corrections(
         db_obj=step_result,
         corrections=corrections
     ) 
+
+@router.get("/user/analyses", response_model=List[Analysis])
+async def list_user_analyses(
+    status: Optional[str] = Query(None, description="Filter by analysis status (pending, in_progress, completed, failed)"),
+    analysis_type_id: Optional[str] = Query(None, description="Filter by analysis type ID"),
+    document_type: Optional[DocumentType] = Query(None, description="Filter by document type"),
+    start_date: Optional[datetime] = Query(None, description="Filter by start date (inclusive)"),
+    end_date: Optional[datetime] = Query(None, description="Filter by end date (inclusive)"),
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(100, ge=1, le=1000, description="Number of records to return"),
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_verified_user),
+) -> List[Analysis]:
+    """
+    List all analyses for the current user with filtering options.
+    
+    Parameters:
+    - status: Filter by analysis status
+    - analysis_type_id: Filter by analysis type
+    - document_type: Filter by document type
+    - start_date: Filter by start date (inclusive)
+    - end_date: Filter by end date (inclusive)
+    - skip: Number of records to skip (pagination)
+    - limit: Number of records to return (pagination)
+    
+    Returns:
+    - List of analyses matching the filter criteria
+    """
+    try:
+        filters = {
+            "user_id": str(current_user.id),
+            "status": status,
+            "analysis_type_id": analysis_type_id,
+            "document_type": document_type,
+            "start_date": start_date,
+            "end_date": end_date
+        }
+        
+        # Remove None values from filters
+        filters = {k: v for k, v in filters.items() if v is not None}
+        
+        analyses = crud_analysis.analysis.get_multi_by_filters(
+            db=db,
+            filters=filters,
+            skip=skip,
+            limit=limit
+        )
+        
+        return analyses
+        
+    except Exception as e:
+        logger.error(f"Error fetching analyses for user {current_user.id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error fetching analyses"
+        ) 
