@@ -6,10 +6,19 @@ import numpy as np
 import cv2
 from PIL import Image
 import io
+from datetime import datetime
 
 from app.core.analysis import AnalysisPlugin
 from app.db.models.document import DocumentType
 from app.core.config import settings
+from app.schemas.analysis_results import (
+    TableDetectionOutput,
+    TableDetectionResult,
+    TableLocation,
+    BoundingBox,
+    Confidence,
+    PageInfo
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,14 +85,26 @@ class TableDetectionBasic(AnalysisPlugin):
             except:
                 raise ValueError("Invalid page_range format")
     
+    def _normalize_bbox(self, bbox: List[int], width: int, height: int) -> BoundingBox:
+        """Convert pixel coordinates to normalized coordinates (0-1)."""
+        x1, y1, x2, y2 = bbox
+        return BoundingBox(
+            x1=x1 / width,
+            y1=y1 / height,
+            x2=x2 / width,
+            y2=y2 / height
+        )
+
     def _detect_tables_in_image(
         self,
         image: np.ndarray,
         max_tables: int,
         min_table_size: float
-    ) -> List[Dict[str, Any]]:
+    ) -> List[TableLocation]:
         """Detect tables in an image using contour detection."""
         try:
+            height, width = image.shape[:2]
+            
             # Convert to grayscale
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             
@@ -106,25 +127,31 @@ class TableDetectionBasic(AnalysisPlugin):
             
             # Filter and sort contours
             min_area = image.shape[0] * image.shape[1] * min_table_size
-            table_contours = []
+            table_locations = []
             
             for contour in contours:
                 area = cv2.contourArea(contour)
                 if area >= min_area:
                     x, y, w, h = cv2.boundingRect(contour)
-                    table_contours.append({
-                        "bbox": [x, y, x + w, y + h],
-                        "confidence": min(0.95, area / (image.shape[0] * image.shape[1]))
-                    })
+                    confidence_score = min(0.95, area / (image.shape[0] * image.shape[1]))
+                    
+                    table_locations.append(TableLocation(
+                        bbox=self._normalize_bbox([x, y, x + w, y + h], width, height),
+                        confidence=Confidence(
+                            score=confidence_score,
+                            method="contour_area_ratio"
+                        ),
+                        table_type="bordered" if confidence_score > 0.7 else "borderless"
+                    ))
             
-            # Sort by area (largest first) and limit number
-            table_contours.sort(key=lambda x: (x["bbox"][2] - x["bbox"][0]) * (x["bbox"][3] - x["bbox"][1]), reverse=True)
-            return table_contours[:max_tables]
+            # Sort by confidence and limit number
+            table_locations.sort(key=lambda x: x.confidence.score, reverse=True)
+            return table_locations[:max_tables]
             
         except Exception as e:
             logger.error(f"Error in table detection: {str(e)}")
             return []
-    
+
     async def execute(self, document_path: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """Execute table detection on the document."""
         try:
@@ -164,10 +191,17 @@ class TableDetectionBasic(AnalysisPlugin):
                         )
                         
                         if tables:
-                            results.append({
-                                "page": page_num + 1,
-                                "tables": tables
-                            })
+                            results.append(TableDetectionResult(
+                                page_info=PageInfo(
+                                    page_number=page_num + 1,
+                                    width=pix.width,
+                                    height=pix.height
+                                ),
+                                tables=tables,
+                                processing_info={
+                                    "parameters": parameters
+                                }
+                            ))
                             
                     except Exception as e:
                         logger.error(f"Error processing page {page_num}: {str(e)}")
@@ -180,6 +214,7 @@ class TableDetectionBasic(AnalysisPlugin):
                 if img is None:
                     raise ValueError("Failed to load image")
                 
+                height, width = img.shape[:2]
                 tables = self._detect_tables_in_image(
                     img,
                     parameters["max_tables"],
@@ -187,16 +222,31 @@ class TableDetectionBasic(AnalysisPlugin):
                 )
                 
                 if tables:
-                    results.append({
-                        "page": 1,
-                        "tables": tables
-                    })
+                    results.append(TableDetectionResult(
+                        page_info=PageInfo(
+                            page_number=1,
+                            width=width,
+                            height=height
+                        ),
+                        tables=tables,
+                        processing_info={
+                            "parameters": parameters
+                        }
+                    ))
             
-            return {
-                "tables_found": sum(len(r["tables"]) for r in results),
-                "pages_processed": len(results),
-                "results": results
-            }
+            # Create standardized output
+            output = TableDetectionOutput(
+                total_pages_processed=len(results),
+                total_tables_found=sum(len(result.tables) for result in results),
+                results=results,
+                metadata={
+                    "document_type": "pdf" if full_path.suffix.lower() == ".pdf" else "image",
+                    "plugin_version": self.VERSION,
+                    "processing_timestamp": str(datetime.utcnow())
+                }
+            )
+            
+            return output.dict()
             
         except Exception as e:
             logger.error(f"Error in table detection: {str(e)}")
