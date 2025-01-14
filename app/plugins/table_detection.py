@@ -9,6 +9,7 @@ import io
 
 from app.core.analysis import AnalysisPlugin
 from app.db.models.document import DocumentType
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -128,14 +129,16 @@ class TableDetectionBasic(AnalysisPlugin):
         """Execute table detection on the document."""
         try:
             results = []
-            full_path = Path(document_path)
+            # Convert URL-style path to filesystem path
+            relative_path = document_path.replace("/uploads/", "")
+            full_path = Path(settings.UPLOAD_DIR) / relative_path
             
             if not full_path.exists():
                 raise FileNotFoundError(f"Document not found: {document_path}")
             
             if full_path.suffix.lower() in [".pdf"]:
                 # Process PDF
-                doc = fitz.open(full_path)
+                doc = fitz.open(str(full_path))
                 
                 # Determine pages to process
                 if parameters.get("page_range") == "all":
@@ -167,13 +170,12 @@ class TableDetectionBasic(AnalysisPlugin):
                             })
                             
                     except Exception as e:
-                        logger.error(f"Error processing page {page_num + 1}: {str(e)}")
+                        logger.error(f"Error processing page {page_num}: {str(e)}")
                         continue
                         
                 doc.close()
                 
-            else:
-                # Process image
+            else:  # Process image
                 img = cv2.imread(str(full_path))
                 if img is None:
                     raise ValueError("Failed to load image")
@@ -192,6 +194,7 @@ class TableDetectionBasic(AnalysisPlugin):
             
             return {
                 "tables_found": sum(len(r["tables"]) for r in results),
+                "pages_processed": len(results),
                 "results": results
             }
             

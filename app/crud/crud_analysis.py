@@ -2,6 +2,7 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from fastapi.encoders import jsonable_encoder
 from datetime import datetime
+import logging
 
 from app.crud.base import CRUDBase
 from app.db.models.analysis import (
@@ -23,6 +24,8 @@ from app.schemas.analysis import (
     AnalysisStepResultCreate,
     AnalysisStepResultUpdate
 )
+
+logger = logging.getLogger(__name__)
 
 class CRUDAnalysisType(CRUDBase[AnalysisType, AnalysisTypeCreate, AnalysisTypeUpdate]):
     def get_with_steps(self, db: Session, id: str) -> Optional[AnalysisType]:
@@ -92,14 +95,48 @@ class CRUDAnalysis(CRUDBase[Analysis, AnalysisCreate, AnalysisUpdate]):
 
         # Get all steps for this analysis type
         steps = db.query(AnalysisStep).filter(
-            AnalysisStep.analysis_type_id == obj_in.analysis_type_id
+            AnalysisStep.analysis_type_id == str(obj_in.analysis_type_id)
         ).order_by(AnalysisStep.order).all()
 
         # Create step results
         for step in steps:
             step_config = algorithm_configs.get(str(step.id), {})
+            
+            # If no algorithm specified, get the first active algorithm for this step
             algorithm_id = step_config.get("algorithm_id")
-            parameters = step_config.get("parameters", {})
+            if not algorithm_id:
+                default_algorithm = db.query(Algorithm).filter(
+                    Algorithm.step_id == step.id,
+                    Algorithm.is_active == True
+                ).first()
+                if default_algorithm:
+                    algorithm_id = default_algorithm.id
+                    
+                    # Get default parameters from the algorithm
+                    parameters = {}
+                    for param in default_algorithm.parameters:
+                        if isinstance(param, dict) and param.get('default') is not None:
+                            parameters[param['name']] = param['default']
+                else:
+                    # Log warning if no active algorithm found
+                    logger.warning(f"No active algorithm found for step {step.id}")
+                    continue
+            else:
+                # If algorithm is specified but no parameters, get defaults
+                algorithm = db.query(Algorithm).filter(
+                    Algorithm.id == algorithm_id,
+                    Algorithm.is_active == True
+                ).first()
+                if algorithm:
+                    parameters = step_config.get("parameters", {})
+                    # Add any missing parameters with their defaults
+                    for param in algorithm.parameters:
+                        if isinstance(param, dict) and param['name'] not in parameters and param.get('default') is not None:
+                            parameters[param['name']] = param['default']
+                else:
+                    # Log warning if specified algorithm not found or not active
+                    logger.warning(f"Specified algorithm {algorithm_id} not found or not active")
+                    continue
 
             step_result = AnalysisStepResult(
                 analysis_id=db_obj.id,

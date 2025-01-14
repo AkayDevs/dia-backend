@@ -49,20 +49,27 @@ class AnalysisOrchestrator:
         """Load all available analysis plugins."""
         try:
             # Import all modules in the plugins directory
+            logger.info("Starting to load plugins...")
             plugins_module = importlib.import_module("app.plugins")
+            logger.info(f"Found plugins module: {plugins_module}")
             
             # Find all plugin classes
             for module_name in dir(plugins_module):
+                logger.info(f"Checking module: {module_name}")
                 if module_name.startswith("_"):
                     continue
                 
                 module = getattr(plugins_module, module_name)
+                logger.info(f"Examining module object: {module}")
+                
                 for name, obj in inspect.getmembers(module):
+                    logger.info(f"Examining member: {name}, type: {type(obj)}")
                     if (inspect.isclass(obj) and 
                         issubclass(obj, AnalysisPlugin) and 
                         obj != AnalysisPlugin):
                         plugin_key = f"{obj.get_name()}_{obj.get_version()}"
                         self.plugins[plugin_key] = obj
+                        logger.info(f"Successfully loaded plugin: {plugin_key}")
                         
             logger.info(f"Loaded {len(self.plugins)} analysis plugins")
             

@@ -116,6 +116,7 @@ class AnalysisBase(BaseModel):
 class AnalysisCreate(AnalysisBase):
     document_id: UUID
     analysis_type_id: UUID
+    mode: str = Field(..., pattern="^(automatic|step_by_step)$")
 
 class AnalysisUpdate(AnalysisBase):
     pass

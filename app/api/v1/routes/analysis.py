@@ -13,7 +13,8 @@ from app.schemas.analysis import (
     Analysis,
     AnalysisStepResult,
     AnalysisRequest,
-    StepExecutionRequest
+    StepExecutionRequest,
+    AnalysisCreate
 )
 from app.db.models.user import User
 from app.core.analysis import AnalysisOrchestrator
@@ -100,14 +101,15 @@ async def start_analysis(
 
     try:
         # Create analysis with steps
+        analysis_create = AnalysisCreate(
+            document_id=document_id,
+            analysis_type_id=analysis_request.analysis_type_id,
+            mode=analysis_request.mode
+        )
+        
         analysis_obj = crud_analysis.analysis.create_with_steps(
             db=db,
-            obj_in={
-                "document_id": document_id,
-                "analysis_type_id": str(analysis_request.analysis_type_id),
-                "mode": analysis_request.mode,
-                "status": "pending"
-            },
+            obj_in=analysis_create,
             algorithm_configs=analysis_request.algorithm_configs
         )
 
