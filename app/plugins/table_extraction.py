@@ -1,4 +1,4 @@
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple, Optional
 import logging
 from pathlib import Path
 import fitz  # PyMuPDF
@@ -9,6 +9,7 @@ import io
 from datetime import datetime
 import pytesseract
 import re
+import uuid
 
 from app.core.analysis import AnalysisPlugin
 from app.db.models.document import DocumentType
@@ -68,23 +69,41 @@ class TableDataBasic(AnalysisPlugin):
         if not (0.1 <= parameters["confidence_threshold"] <= 1.0):
             raise ValueError("confidence_threshold must be between 0.1 and 1.0")
 
-    def _detect_data_type(self, text: str) -> str:
-        """Detect the data type of a cell's content."""
-        # Try number
-        if re.match(r'^-?\d*\.?\d+$', text.strip()):
-            return "number"
-        
-        # Try date (simple pattern, can be expanded)
-        date_patterns = [
-            r'\d{4}-\d{2}-\d{2}',  # YYYY-MM-DD
-            r'\d{2}/\d{2}/\d{4}',  # DD/MM/YYYY
-            r'\d{2}-\d{2}-\d{4}'   # DD-MM-YYYY
-        ]
-        for pattern in date_patterns:
-            if re.match(pattern, text.strip()):
-                return "date"
-        
-        return "text"
+    def _detect_data_type(
+        self,
+        text: str,
+        data_types: List[str]
+    ) -> Tuple[str, Optional[Any]]:
+        """Detect the data type of cell content and normalize if possible."""
+        text = text.strip()
+        if not text:
+            return "text", None
+            
+        if "number" in data_types:
+            try:
+                # Try to convert to number
+                if '.' in text:
+                    value = float(text.replace(',', ''))
+                    return "number", value
+                else:
+                    value = int(text.replace(',', ''))
+                    return "number", value
+            except ValueError:
+                pass
+                
+        if "date" in data_types:
+            try:
+                # Try common date formats
+                for fmt in ["%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y", "%Y/%m/%d"]:
+                    try:
+                        value = datetime.strptime(text, fmt)
+                        return "date", value.isoformat()
+                    except ValueError:
+                        continue
+            except Exception:
+                pass
+                
+        return "text", text
 
     def _normalize_value(self, text: str, data_type: str) -> Any:
         """Normalize the value based on its data type."""
@@ -104,44 +123,85 @@ class TableDataBasic(AnalysisPlugin):
         cell_bbox: BoundingBox,
         parameters: Dict[str, Any]
     ) -> CellContent:
-        """Extract content from a single cell."""
-        # Crop cell region
-        cell_img = image[cell_bbox.y1:cell_bbox.y2, cell_bbox.x1:cell_bbox.x2]
-        
-        # Perform OCR
-        ocr_result = pytesseract.image_to_data(
-            cell_img,
-            lang=parameters["ocr_lang"],
-            output_type=pytesseract.Output.DICT
-        )
-        
-        # Combine text and calculate confidence
-        text_parts = []
-        conf_sum = 0
-        conf_count = 0
-        
-        for i, conf in enumerate(ocr_result['conf']):
-            if conf > parameters["confidence_threshold"] * 100:  # tesseract conf is 0-100
-                text_parts.append(ocr_result['text'][i])
-                conf_sum += conf
-                conf_count += 1
-        
-        text = ' '.join(text_parts).strip()
-        confidence = (conf_sum / conf_count / 100) if conf_count > 0 else 0
-        
-        # Detect data type and normalize value
-        data_type = self._detect_data_type(text)
-        normalized_value = self._normalize_value(text, data_type)
-        
-        return CellContent(
-            text=text,
-            confidence=Confidence(
-                score=confidence,
-                method="tesseract_ocr"
-            ),
-            data_type=data_type,
-            normalized_value=normalized_value
-        )
+        """Extract content from a cell using OCR."""
+        try:
+            height, width = image.shape[:2]
+            
+            # Ensure bbox coordinates are within image boundaries
+            x1 = max(0, min(cell_bbox.x1, width - 1))
+            y1 = max(0, min(cell_bbox.y1, height - 1))
+            x2 = max(0, min(cell_bbox.x2, width))
+            y2 = max(0, min(cell_bbox.y2, height))
+            
+            # Skip if cell area is too small
+            if x2 <= x1 or y2 <= y1:
+                return CellContent(
+                    text="",
+                    confidence=Confidence(score=0.0, method="none"),
+                    data_type="text",
+                    normalized_value=None
+                )
+            
+            # Crop cell region
+            cell_img = image[y1:y2, x1:x2]
+            
+            # Convert to grayscale for OCR
+            if len(cell_img.shape) == 3:
+                cell_img = cv2.cvtColor(cell_img, cv2.COLOR_BGR2GRAY)
+            
+            # Save temporary image for OCR
+            temp_path = Path(settings.TEMP_DIR) / f"cell_{uuid.uuid4()}.png"
+            cv2.imwrite(str(temp_path), cell_img)
+            
+            try:
+                # Perform OCR
+                text = pytesseract.image_to_string(
+                    str(temp_path),
+                    lang=parameters.get("ocr_lang", "eng"),
+                    config='--psm 6'  # Assume uniform block of text
+                ).strip()
+                
+                # Get confidence score
+                confidence_data = pytesseract.image_to_data(
+                    str(temp_path),
+                    lang=parameters.get("ocr_lang", "eng"),
+                    config='--psm 6',
+                    output_type=pytesseract.Output.DICT
+                )
+                
+                # Calculate average confidence
+                confidences = [float(conf) / 100 for conf in confidence_data['conf'] if conf != '-1']
+                confidence_score = sum(confidences) / len(confidences) if confidences else 0.0
+                
+                # Detect data type
+                data_type, normalized_value = self._detect_data_type(
+                    text,
+                    parameters.get("data_types", ["text", "number", "date"])
+                )
+                
+                return CellContent(
+                    text=text,
+                    confidence=Confidence(
+                        score=confidence_score,
+                        method="tesseract_ocr"
+                    ),
+                    data_type=data_type,
+                    normalized_value=normalized_value
+                )
+                
+            finally:
+                # Clean up temporary file
+                if temp_path.exists():
+                    temp_path.unlink()
+                    
+        except Exception as e:
+            logger.error(f"Error extracting cell content: {str(e)}")
+            return CellContent(
+                text="",
+                confidence=Confidence(score=0.0, method="error"),
+                data_type="text",
+                normalized_value=None
+            )
 
     def _extract_table_data(
         self,
@@ -150,44 +210,59 @@ class TableDataBasic(AnalysisPlugin):
         parameters: Dict[str, Any]
     ) -> TableData:
         """Extract data from a table using its structure."""
-        bbox = BoundingBox(**table_structure["bbox"])
-        cells = [BoundingBox(**cell["bbox"]) for cell in table_structure["cells"]]
-        num_rows = table_structure["num_rows"]
-        num_cols = table_structure["num_cols"]
-        
-        # Create 2D array for cell contents
-        cell_contents = []
-        cell_idx = 0
-        
-        for i in range(num_rows):
-            row = []
-            for j in range(num_cols):
-                if cell_idx < len(cells):
-                    content = self._extract_cell_content(
-                        image,
-                        cells[cell_idx],
-                        parameters
-                    )
-                    row.append(content)
-                    cell_idx += 1
-                else:
-                    # Handle missing cells
-                    row.append(CellContent(
-                        text="",
-                        confidence=Confidence(score=0.0, method="none"),
-                        data_type="text",
-                        normalized_value=None
-                    ))
-            cell_contents.append(row)
-        
-        return TableData(
-            bbox=bbox,
-            cells=cell_contents,
-            confidence=Confidence(
-                score=sum(cell.confidence.score for row in cell_contents for cell in row) / (num_rows * num_cols),
-                method="average_cell_confidence"
+        try:
+            bbox = BoundingBox(**table_structure["bbox"])
+            cells = [BoundingBox(**cell["bbox"]) for cell in table_structure["cells"]]
+            num_rows = table_structure["num_rows"]
+            num_cols = table_structure["num_cols"]
+            
+            # Create 2D array for cell contents
+            cell_contents = []
+            cell_idx = 0
+            
+            for i in range(num_rows):
+                row = []
+                for j in range(num_cols):
+                    if cell_idx < len(cells):
+                        content = self._extract_cell_content(
+                            image,
+                            cells[cell_idx],
+                            parameters
+                        )
+                        row.append(content)
+                        cell_idx += 1
+                    else:
+                        # Handle missing cells
+                        row.append(CellContent(
+                            text="",
+                            confidence=Confidence(score=0.0, method="none"),
+                            data_type="text",
+                            normalized_value=None
+                        ))
+                cell_contents.append(row)
+            
+            return TableData(
+                bbox=bbox,
+                cells=cell_contents,
+                confidence=Confidence(
+                    score=sum(cell.confidence.score for row in cell_contents for cell in row) / (num_rows * num_cols),
+                    method="average_cell_confidence"
+                )
             )
-        )
+            
+        except Exception as e:
+            logger.error(f"Error extracting table data: {str(e)}")
+            # Return empty table data with error confidence
+            return TableData(
+                bbox=bbox,
+                cells=[[CellContent(
+                    text="",
+                    confidence=Confidence(score=0.0, method="error"),
+                    data_type="text",
+                    normalized_value=None
+                )] * num_cols for _ in range(num_rows)],
+                confidence=Confidence(score=0.0, method="error")
+            )
 
     async def execute(
         self,

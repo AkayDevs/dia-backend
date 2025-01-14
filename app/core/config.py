@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     MAX_ANALYSIS_TIME: int = 300  # Maximum time in seconds for analysis
     CONCURRENT_ANALYSIS_LIMIT: int = 5  # Maximum concurrent analysis tasks
     ANALYSIS_QUEUE_TIMEOUT: int = 600  # Timeout for queued analysis tasks
+    TEMP_DIR: str = "temp"
     
     # Admin Settings
     ADMIN_BASE_URL: str = "/admin"
