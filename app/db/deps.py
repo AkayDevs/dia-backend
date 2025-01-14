@@ -70,8 +70,8 @@ class RateLimiter:
 # Initialize rate limiter with settings
 try:
     rate_limiter = RateLimiter(
-        requests_per_minute=getattr(settings, 'API_RATE_LIMIT_PER_MINUTE', 60),
-        burst_limit=getattr(settings, 'API_RATE_LIMIT_BURST', 100)
+        requests_per_minute=getattr(settings, 'API_RATE_LIMIT_PER_MINUTE', 100),
+        burst_limit=getattr(settings, 'API_RATE_LIMIT_BURST', 160)
     )
     logger.info(f"Rate limiter initialized with {rate_limiter.requests_per_minute} requests/minute")
 except Exception as e:
