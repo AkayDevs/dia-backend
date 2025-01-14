@@ -85,14 +85,13 @@ class TableDetectionBasic(AnalysisPlugin):
             except:
                 raise ValueError("Invalid page_range format")
     
-    def _normalize_bbox(self, bbox: List[int], width: int, height: int) -> BoundingBox:
-        """Convert pixel coordinates to normalized coordinates (0-1)."""
-        x1, y1, x2, y2 = bbox
+    def _create_bbox(self, x: int, y: int, w: int, h: int) -> BoundingBox:
+        """Create a bounding box from pixel coordinates."""
         return BoundingBox(
-            x1=x1 / width,
-            y1=y1 / height,
-            x2=x2 / width,
-            y2=y2 / height
+            x1=x,
+            y1=y,
+            x2=x + w,
+            y2=y + h
         )
 
     def _detect_tables_in_image(
@@ -136,7 +135,7 @@ class TableDetectionBasic(AnalysisPlugin):
                     confidence_score = min(0.95, area / (image.shape[0] * image.shape[1]))
                     
                     table_locations.append(TableLocation(
-                        bbox=self._normalize_bbox([x, y, x + w, y + h], width, height),
+                        bbox=self._create_bbox(x, y, w, h),
                         confidence=Confidence(
                             score=confidence_score,
                             method="contour_area_ratio"

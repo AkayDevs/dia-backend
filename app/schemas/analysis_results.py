@@ -3,16 +3,22 @@ from pydantic import BaseModel, Field, validator
 from enum import Enum
 
 class BoundingBox(BaseModel):
-    """Standard bounding box representation."""
-    x1: float = Field(..., description="Left coordinate (normalized 0-1)")
-    y1: float = Field(..., description="Top coordinate (normalized 0-1)")
-    x2: float = Field(..., description="Right coordinate (normalized 0-1)")
-    y2: float = Field(..., description="Bottom coordinate (normalized 0-1)")
+    """Standard bounding box representation in pixels."""
+    x1: int = Field(..., description="Left coordinate in pixels", ge=0)
+    y1: int = Field(..., description="Top coordinate in pixels", ge=0)
+    x2: int = Field(..., description="Right coordinate in pixels", ge=0)
+    y2: int = Field(..., description="Bottom coordinate in pixels", ge=0)
 
-    @validator('x1', 'x2', 'y1', 'y2')
-    def validate_coordinates(cls, v):
-        if not 0 <= v <= 1:
-            raise ValueError("Coordinates must be normalized between 0 and 1")
+    @validator('x2')
+    def validate_x2(cls, v, values):
+        if 'x1' in values and v < values['x1']:
+            raise ValueError("x2 must be greater than or equal to x1")
+        return v
+
+    @validator('y2')
+    def validate_y2(cls, v, values):
+        if 'y1' in values and v < values['y1']:
+            raise ValueError("y2 must be greater than or equal to y1")
         return v
 
 class Confidence(BaseModel):
