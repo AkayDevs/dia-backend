@@ -151,7 +151,12 @@ class TableDetectionBasic(AnalysisPlugin):
             logger.error(f"Error in table detection: {str(e)}")
             return []
 
-    async def execute(self, document_path: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(
+        self,
+        document_path: str,
+        parameters: Dict[str, Any],
+        previous_results: Dict[str, Dict[str, Any]] = {}
+    ) -> Dict[str, Any]:
         """Execute table detection on the document."""
         try:
             results = []
@@ -163,19 +168,21 @@ class TableDetectionBasic(AnalysisPlugin):
                 raise FileNotFoundError(f"Document not found: {document_path}")
             
             if full_path.suffix.lower() in [".pdf"]:
-                # Process PDF
                 doc = fitz.open(str(full_path))
                 
-                # Determine pages to process
-                if parameters.get("page_range") == "all":
-                    pages = range(doc.page_count)
+                # Get pages to process
+                if parameters["page_range"] == "all":
+                    pages = range(1, doc.page_count + 1)
                 else:
-                    pages = [p - 1 for p in parameters["_parsed_pages"] if p <= doc.page_count]
+                    pages = parameters["_parsed_pages"]
+                    # Validate page numbers
+                    if any(p > doc.page_count for p in pages):
+                        raise ValueError(f"Page number exceeds document length ({doc.page_count} pages)")
                 
                 # Process each page
                 for page_num in pages:
                     try:
-                        page = doc[page_num]
+                        page = doc[page_num - 1]
                         pix = page.get_pixmap()
                         
                         # Convert to numpy array
@@ -192,7 +199,7 @@ class TableDetectionBasic(AnalysisPlugin):
                         if tables:
                             results.append(TableDetectionResult(
                                 page_info=PageInfo(
-                                    page_number=page_num + 1,
+                                    page_number=page_num,
                                     width=pix.width,
                                     height=pix.height
                                 ),
@@ -201,11 +208,10 @@ class TableDetectionBasic(AnalysisPlugin):
                                     "parameters": parameters
                                 }
                             ))
-                            
                     except Exception as e:
                         logger.error(f"Error processing page {page_num}: {str(e)}")
                         continue
-                        
+                    
                 doc.close()
                 
             else:  # Process image

@@ -178,7 +178,12 @@ class TableStructureBasic(AnalysisPlugin):
             )
         )
 
-    async def execute(self, document_path: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(
+        self,
+        document_path: str,
+        parameters: Dict[str, Any],
+        previous_results: Dict[str, Dict[str, Any]] = {}
+    ) -> Dict[str, Any]:
         """Execute table structure recognition on the document."""
         try:
             results = []
@@ -190,14 +195,14 @@ class TableStructureBasic(AnalysisPlugin):
                 raise FileNotFoundError(f"Document not found: {document_path}")
             
             # Get table locations from previous step
-            prev_step_result = parameters.get("previous_step_result", {})
-            if not prev_step_result:
+            table_detection_results = previous_results.get("table_detection", {})
+            if not table_detection_results:
                 raise ValueError("No table detection results found")
             
             if full_path.suffix.lower() in [".pdf"]:
                 doc = fitz.open(str(full_path))
                 
-                for result in prev_step_result.get("results", []):
+                for result in table_detection_results.get("results", []):
                     page_num = result["page_info"]["page_number"]
                     page = doc[page_num - 1]
                     pix = page.get_pixmap()
@@ -240,7 +245,7 @@ class TableStructureBasic(AnalysisPlugin):
                 tables = []
                 
                 # Process each table from previous step
-                for result in prev_step_result.get("results", []):
+                for result in table_detection_results.get("results", []):
                     for table_loc in result["tables"]:
                         table_structure = self._detect_table_structure(
                             img,

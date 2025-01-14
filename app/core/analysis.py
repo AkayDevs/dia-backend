@@ -34,8 +34,22 @@ class AnalysisPlugin:
         """Validate input parameters against plugin's parameter definitions."""
         pass
     
-    async def execute(self, document_path: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute the analysis step on the document."""
+    async def execute(
+        self,
+        document_path: str,
+        parameters: Dict[str, Any],
+        previous_results: Dict[str, Dict[str, Any]] = {}
+    ) -> Dict[str, Any]:
+        """Execute the analysis step on the document.
+        
+        Args:
+            document_path: Path to the document to analyze
+            parameters: Parameters for this analysis step
+            previous_results: Results from previous steps, keyed by step name
+            
+        Returns:
+            Dictionary containing the results of this analysis step
+        """
         raise NotImplementedError
 
 class AnalysisOrchestrator:
@@ -106,6 +120,26 @@ class AnalysisOrchestrator:
             document = crud_document.document.get(db, id=analysis.document_id)
             document_path = document.url.replace("/uploads/", "")
             
+            # Get previous step results if they exist
+            previous_results = {}
+            if analysis.step_results:
+                # Sort step results by step order
+                sorted_results = sorted(
+                    analysis.step_results,
+                    key=lambda x: x.step.order
+                )
+                
+                # Find current step's position
+                current_step_idx = next(
+                    (i for i, r in enumerate(sorted_results) if r.id == step_result.id),
+                    -1
+                )
+                
+                # Get all completed previous steps' results
+                for prev_result in sorted_results[:current_step_idx]:
+                    if prev_result.status == "completed":
+                        previous_results[prev_result.step.name] = prev_result.result
+            
             # Get and initialize plugin
             plugin_class = self._get_plugin(step_result.algorithm_id, db)
             if not plugin_class:
@@ -116,8 +150,12 @@ class AnalysisOrchestrator:
             # Validate parameters
             plugin.validate_parameters(step_result.parameters)
             
-            # Execute plugin
-            result = await plugin.execute(document_path, step_result.parameters)
+            # Execute plugin with previous results
+            result = await plugin.execute(
+                document_path=document_path,
+                parameters=step_result.parameters,
+                previous_results=previous_results
+            )
             
             # Update step result
             crud_analysis.analysis_step_result.update_result(
@@ -126,7 +164,7 @@ class AnalysisOrchestrator:
                 result=result,
                 status="completed"
             )
-            
+
             # Update analysis status if all steps are complete
             self._update_analysis_status(db, analysis)
             

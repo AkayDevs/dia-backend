@@ -189,7 +189,12 @@ class TableDataBasic(AnalysisPlugin):
             )
         )
 
-    async def execute(self, document_path: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(
+        self,
+        document_path: str,
+        parameters: Dict[str, Any],
+        previous_results: Dict[str, Dict[str, Any]] = {}
+    ) -> Dict[str, Any]:
         """Execute table data extraction on the document."""
         try:
             results = []
@@ -201,14 +206,14 @@ class TableDataBasic(AnalysisPlugin):
                 raise FileNotFoundError(f"Document not found: {document_path}")
             
             # Get table structures from previous step
-            prev_step_result = parameters.get("previous_step_result", {})
-            if not prev_step_result:
+            table_structure_results = previous_results.get("table_structure_recognition", {})
+            if not table_structure_results:
                 raise ValueError("No table structure results found")
             
             if full_path.suffix.lower() in [".pdf"]:
                 doc = fitz.open(str(full_path))
                 
-                for result in prev_step_result.get("results", []):
+                for result in table_structure_results.get("results", []):
                     page_num = result["page_info"]["page_number"]
                     page = doc[page_num - 1]
                     pix = page.get_pixmap()
@@ -251,7 +256,7 @@ class TableDataBasic(AnalysisPlugin):
                 tables = []
                 
                 # Process each table from previous step
-                for result in prev_step_result.get("results", []):
+                for result in table_structure_results.get("results", []):
                     for table_struct in result["tables"]:
                         table_data = self._extract_table_data(
                             img,
