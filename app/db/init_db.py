@@ -44,10 +44,10 @@ def init_db(db: Session) -> None:
             
             logger.info("Admin user created successfully")
             logger.debug(f"""Admin user details:
-- Email: {user.email}
-- Role: {user.role}
-- Active: {user.is_active}
-- Verified: {user.is_verified}""")
+                - Email: {user.email}
+                - Role: {user.role}
+                - Active: {user.is_active}
+                - Verified: {user.is_verified}""")
             
         except Exception as e:
             logger.error(f"Error creating admin user: {e}")

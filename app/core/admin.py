@@ -1,7 +1,10 @@
 from sqladmin import ModelView, Admin
 from sqladmin.authentication import AuthenticationBackend
 from app.db.models.document import Document, Tag
-from app.db.models.analysis_result import AnalysisResult
+from app.db.models.analysis import (
+    AnalysisType, AnalysisStep, Algorithm, Analysis,
+    AnalysisStepResult, AnalysisTypeEnum, AnalysisStepEnum
+)
 from app.db.models.token import BlacklistedToken
 from app.db.models.user import User, UserRole
 from app.core.config import settings
@@ -12,7 +15,7 @@ from app.db.session import get_db
 import jwt as PyJWT
 from datetime import datetime
 import logging
-from app.schemas.analysis import AnalysisStatus
+from fastapi import FastAPI
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +181,6 @@ class AdminAuth(AuthenticationBackend):
                 status_code=status.HTTP_302_FOUND
             )
 
-
 class TagAdmin(ModelView, model=Tag):
     """Admin interface for Tag model."""
     name = "Tag"
@@ -205,7 +207,6 @@ class TagAdmin(ModelView, model=Tag):
     can_edit = True
     page_size = settings.ADMIN_PAGE_SIZE
     page_size_options = settings.ADMIN_PAGE_SIZE_OPTIONS
-
 
 class UserAdmin(ModelView, model=User):
     """Admin interface for User model."""
@@ -252,7 +253,6 @@ class UserAdmin(ModelView, model=User):
     
     page_size = settings.ADMIN_PAGE_SIZE
     page_size_options = settings.ADMIN_PAGE_SIZE_OPTIONS
-
 
 class DocumentAdmin(ModelView, model=Document):
     """Admin interface for Document model."""
@@ -321,93 +321,6 @@ class DocumentAdmin(ModelView, model=Document):
     page_size = settings.ADMIN_PAGE_SIZE
     page_size_options = settings.ADMIN_PAGE_SIZE_OPTIONS
 
-
-class AnalysisResultAdmin(ModelView, model=AnalysisResult):
-    """Admin interface for AnalysisResult model."""
-    name = "Analysis Result"
-    name_plural = "Analysis Results"
-    icon = "fa-solid fa-chart-simple"
-    column_list = [
-        AnalysisResult.id,
-        AnalysisResult.document_id,
-        AnalysisResult.type,
-        AnalysisResult.mode,
-        AnalysisResult.status,
-        AnalysisResult.current_step,
-        AnalysisResult.progress,
-        AnalysisResult.created_at,
-        AnalysisResult.completed_at
-    ]
-    column_searchable_list = [
-        AnalysisResult.document_id,
-        AnalysisResult.status,
-        AnalysisResult.type,
-        AnalysisResult.mode,
-        AnalysisResult.current_step
-    ]
-    column_sortable_list = [
-        AnalysisResult.created_at,
-        AnalysisResult.completed_at,
-        AnalysisResult.type,
-        AnalysisResult.mode,
-        AnalysisResult.status,
-        AnalysisResult.progress
-    ]
-    column_formatters = {
-        AnalysisResult.type: lambda m, a: f"<span class='badge badge-info'>{m.type.value}</span>",
-        AnalysisResult.mode: lambda m, a: f"<span class='badge badge-primary'>{m.mode.value}</span>",
-        AnalysisResult.status: lambda m, a: f"<span class='badge badge-{_get_status_badge(m.status)}'>{m.status.value}</span>",
-        AnalysisResult.progress: lambda m, a: f"<div class='progress'><div class='progress-bar' role='progressbar' style='width: {m.progress}%' aria-valuenow='{m.progress}' aria-valuemin='0' aria-valuemax='100'>{m.progress}%</div></div>",
-        AnalysisResult.current_step: lambda m, a: f"<span class='badge badge-secondary'>{m.current_step}</span>" if m.current_step else "-"
-    }
-    
-    column_descriptions = {
-        AnalysisResult.document_id: "Associated document ID",
-        AnalysisResult.type: "Type of analysis performed",
-        AnalysisResult.mode: "Analysis execution mode (automatic/step-by-step)",
-        AnalysisResult.status: "Current status of the analysis",
-        AnalysisResult.current_step: "Current step in granular analysis",
-        AnalysisResult.progress: "Analysis progress (0-100%)",
-        AnalysisResult.status_message: "Current status message",
-        AnalysisResult.error: "Error message if analysis failed",
-        AnalysisResult.created_at: "When analysis was started",
-        AnalysisResult.completed_at: "When analysis was completed",
-        AnalysisResult.step_results: "Results for each analysis step (JSON)",
-        AnalysisResult.parameters: "Analysis parameters (JSON)"
-    }
-    
-    column_details_list = [
-        AnalysisResult.id,
-        AnalysisResult.document_id,
-        AnalysisResult.type,
-        AnalysisResult.mode,
-        AnalysisResult.status,
-        AnalysisResult.current_step,
-        AnalysisResult.progress,
-        AnalysisResult.status_message,
-        AnalysisResult.error,
-        AnalysisResult.parameters,
-        AnalysisResult.step_results,
-        AnalysisResult.created_at,
-        AnalysisResult.completed_at
-    ]
-    
-    can_create = False
-    can_delete = False
-    can_edit = False
-    page_size = settings.ADMIN_PAGE_SIZE
-    page_size_options = settings.ADMIN_PAGE_SIZE_OPTIONS
-
-def _get_status_badge(status: AnalysisStatus) -> str:
-    """Get appropriate Bootstrap badge class for status."""
-    return {
-        AnalysisStatus.PENDING: "warning",
-        AnalysisStatus.PROCESSING: "info",
-        AnalysisStatus.COMPLETED: "success",
-        AnalysisStatus.FAILED: "danger"
-    }.get(status, "secondary")
-
-
 class BlacklistedTokenAdmin(ModelView, model=BlacklistedToken):
     """Admin interface for BlacklistedToken model."""
     name = "Blacklisted Token"
@@ -435,30 +348,272 @@ class BlacklistedTokenAdmin(ModelView, model=BlacklistedToken):
     page_size = settings.ADMIN_PAGE_SIZE
     page_size_options = settings.ADMIN_PAGE_SIZE_OPTIONS
 
+class AnalysisTypeAdmin(ModelView, model=AnalysisType):
+    """Admin interface for AnalysisType model."""
+    name = "Analysis Type"
+    name_plural = "Analysis Types"
+    icon = "fa-solid fa-cube"
+    column_list = [
+        AnalysisType.id,
+        AnalysisType.name,
+        AnalysisType.description,
+        AnalysisType.supported_document_types,
+        AnalysisType.created_at,
+        AnalysisType.updated_at
+    ]
+    column_searchable_list = [AnalysisType.name, AnalysisType.description]
+    column_sortable_list = [
+        AnalysisType.name,
+        AnalysisType.created_at,
+        AnalysisType.updated_at
+    ]
+    column_formatters = {
+        AnalysisType.name: lambda m, a: f"<span class='badge badge-primary'>{m.name.value}</span>",
+        AnalysisType.supported_document_types: lambda m, a: ", ".join(m.supported_document_types)
+    }
+    
+    can_create = True
+    can_delete = True
+    can_edit = True
+    
+    form_columns = [
+        AnalysisType.name,
+        AnalysisType.description,
+        AnalysisType.supported_document_types
+    ]
+    
+    page_size = settings.ADMIN_PAGE_SIZE
+    page_size_options = settings.ADMIN_PAGE_SIZE_OPTIONS
 
-def setup_admin(app, engine) -> Admin:
-    """Setup admin interface with all views and authentication."""
+class AnalysisStepAdmin(ModelView, model=AnalysisStep):
+    """Admin interface for AnalysisStep model."""
+    name = "Analysis Step"
+    name_plural = "Analysis Steps"
+    icon = "fa-solid fa-list-ol"
+    column_list = [
+        AnalysisStep.id,
+        AnalysisStep.name,
+        AnalysisStep.description,
+        AnalysisStep.order,
+        AnalysisStep.analysis_type_id,
+        AnalysisStep.created_at,
+        AnalysisStep.updated_at
+    ]
+    column_searchable_list = [
+        AnalysisStep.name,
+        AnalysisStep.description,
+        AnalysisStep.analysis_type_id
+    ]
+    column_sortable_list = [
+        AnalysisStep.order,
+        AnalysisStep.created_at,
+        AnalysisStep.updated_at
+    ]
+    column_formatters = {
+        AnalysisStep.name: lambda m, a: f"<span class='badge badge-info'>{m.name.value}</span>"
+    }
+    
+    can_create = True
+    can_delete = True
+    can_edit = True
+    
+    form_columns = [
+        AnalysisStep.name,
+        AnalysisStep.description,
+        AnalysisStep.order,
+        AnalysisStep.analysis_type_id,
+        AnalysisStep.base_parameters
+    ]
+    
+    page_size = settings.ADMIN_PAGE_SIZE
+    page_size_options = settings.ADMIN_PAGE_SIZE_OPTIONS
+
+class AlgorithmAdmin(ModelView, model=Algorithm):
+    """Admin interface for Algorithm model."""
+    name = "Algorithm"
+    name_plural = "Algorithms"
+    icon = "fa-solid fa-microchip"
+    column_list = [
+        Algorithm.id,
+        Algorithm.name,
+        Algorithm.description,
+        Algorithm.version,
+        Algorithm.step_id,
+        Algorithm.is_active,
+        Algorithm.created_at,
+        Algorithm.updated_at
+    ]
+    column_searchable_list = [
+        Algorithm.name,
+        Algorithm.description,
+        Algorithm.version,
+        Algorithm.step_id
+    ]
+    column_sortable_list = [
+        Algorithm.name,
+        Algorithm.version,
+        Algorithm.is_active,
+        Algorithm.created_at,
+        Algorithm.updated_at
+    ]
+    column_formatters = {
+        Algorithm.is_active: lambda m, a: "✓" if m.is_active else "✗",
+        Algorithm.supported_document_types: lambda m, a: ", ".join(m.supported_document_types)
+    }
+    
+    can_create = True
+    can_delete = True
+    can_edit = True
+    
+    form_columns = [
+        Algorithm.name,
+        Algorithm.description,
+        Algorithm.version,
+        Algorithm.step_id,
+        Algorithm.supported_document_types,
+        Algorithm.is_active,
+        Algorithm.parameters
+    ]
+    
+    page_size = settings.ADMIN_PAGE_SIZE
+    page_size_options = settings.ADMIN_PAGE_SIZE_OPTIONS
+
+class AnalysisAdmin(ModelView, model=Analysis):
+    """Admin interface for Analysis model."""
+    name = "Analysis"
+    name_plural = "Analyses"
+    icon = "fa-solid fa-microscope"
+    column_list = [
+        Analysis.id,
+        Analysis.document_id,
+        Analysis.analysis_type_id,
+        Analysis.mode,
+        Analysis.status,
+        Analysis.created_at,
+        Analysis.updated_at,
+        Analysis.completed_at
+    ]
+    column_searchable_list = [
+        Analysis.document_id,
+        Analysis.analysis_type_id,
+        Analysis.status
+    ]
+    column_sortable_list = [
+        Analysis.created_at,
+        Analysis.updated_at,
+        Analysis.completed_at,
+        Analysis.status
+    ]
+    column_formatters = {
+        Analysis.mode: lambda m, a: f"<span class='badge badge-primary'>{m.mode}</span>",
+        Analysis.status: lambda m, a: f"<span class='badge badge-{_get_analysis_status_badge(m.status)}'>{m.status}</span>"
+    }
+    
+    can_create = False
+    can_delete = False
+    can_edit = False
+    
+    column_details_list = [
+        Analysis.id,
+        Analysis.document_id,
+        Analysis.analysis_type_id,
+        Analysis.mode,
+        Analysis.status,
+        Analysis.error_message,
+        Analysis.created_at,
+        Analysis.updated_at,
+        Analysis.completed_at
+    ]
+    
+    page_size = settings.ADMIN_PAGE_SIZE
+    page_size_options = settings.ADMIN_PAGE_SIZE_OPTIONS
+
+class AnalysisStepResultAdmin(ModelView, model=AnalysisStepResult):
+    """Admin interface for AnalysisStepResult model."""
+    name = "Analysis Step Result"
+    name_plural = "Analysis Step Results"
+    icon = "fa-solid fa-clipboard-check"
+    column_list = [
+        AnalysisStepResult.id,
+        AnalysisStepResult.analysis_id,
+        AnalysisStepResult.step_id,
+        AnalysisStepResult.algorithm_id,
+        AnalysisStepResult.status,
+        AnalysisStepResult.created_at,
+        AnalysisStepResult.completed_at
+    ]
+    column_searchable_list = [
+        AnalysisStepResult.analysis_id,
+        AnalysisStepResult.step_id,
+        AnalysisStepResult.algorithm_id,
+        AnalysisStepResult.status
+    ]
+    column_sortable_list = [
+        AnalysisStepResult.created_at,
+        AnalysisStepResult.updated_at,
+        AnalysisStepResult.completed_at,
+        AnalysisStepResult.status
+    ]
+    column_formatters = {
+        AnalysisStepResult.status: lambda m, a: f"<span class='badge badge-{_get_analysis_status_badge(m.status)}'>{m.status}</span>"
+    }
+    
+    can_create = False
+    can_delete = False
+    can_edit = False
+    
+    column_details_list = [
+        AnalysisStepResult.id,
+        AnalysisStepResult.analysis_id,
+        AnalysisStepResult.step_id,
+        AnalysisStepResult.algorithm_id,
+        AnalysisStepResult.status,
+        AnalysisStepResult.parameters,
+        AnalysisStepResult.result,
+        AnalysisStepResult.user_corrections,
+        AnalysisStepResult.error_message,
+        AnalysisStepResult.created_at,
+        AnalysisStepResult.updated_at,
+        AnalysisStepResult.completed_at
+    ]
+    
+    page_size = settings.ADMIN_PAGE_SIZE
+    page_size_options = settings.ADMIN_PAGE_SIZE_OPTIONS
+
+def _get_analysis_status_badge(status: str) -> str:
+    """Get appropriate Bootstrap badge class for analysis status."""
+    return {
+        "pending": "secondary",
+        "in_progress": "info",
+        "completed": "success",
+        "failed": "danger",
+        "cancelled": "warning",
+        "error": "danger"
+    }.get(status.lower(), "secondary")
+
+def setup_admin(app: FastAPI, engine) -> None:
+    """Setup admin interface."""
     try:
+
         authentication_backend = AdminAuth()
         admin = Admin(
             app,
             engine,
+            base_url="/admin",
+            title="DIA Admin",
             authentication_backend=authentication_backend,
-            title=f"{settings.PROJECT_NAME} Admin",
-            base_url=settings.ADMIN_BASE_URL,
-            logo_url=None  # You can add a logo URL here if needed
+            logo_url="/static/logo.png",
         )
-        
-        # Add views
+
         admin.add_view(UserAdmin)
         admin.add_view(DocumentAdmin)
         admin.add_view(TagAdmin)
-        admin.add_view(AnalysisResultAdmin)
+        admin.add_view(AnalysisTypeAdmin)
+        admin.add_view(AnalysisStepAdmin)
+        admin.add_view(AlgorithmAdmin) 
+        admin.add_view(AnalysisAdmin)
+        admin.add_view(AnalysisStepResultAdmin)
         admin.add_view(BlacklistedTokenAdmin)
-        
-        logger.info("Admin interface setup completed successfully")
-        return admin
-        
     except Exception as e:
-        logger.error(f"Error setting up admin interface: {str(e)}")
-        raise 
+        logger.error(f"Error setting up admin: {str(e)}")
+        raise e

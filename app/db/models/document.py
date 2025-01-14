@@ -6,10 +6,10 @@ import uuid
 
 from app.db.base_class import Base
 from app.schemas.document import DocumentType
-from app.db.models.analysis_result import AnalysisResult
 
 if TYPE_CHECKING:
     from app.db.models.user import User
+    from app.db.models.analysis import Analysis
 
 # Association table for document-tag many-to-many relationship
 document_tags = Table(
@@ -59,7 +59,7 @@ class Document(Base):
 
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="documents")
-    analysis_results: Mapped[List["AnalysisResult"]] = relationship("AnalysisResult", back_populates="document", cascade="all, delete-orphan")
+    analyses: Mapped[List["Analysis"]] = relationship("Analysis", back_populates="document", cascade="all, delete-orphan")
     tags: Mapped[List["Tag"]] = relationship("Tag", secondary=document_tags, back_populates="documents")
 
     __table_args__ = (

@@ -1,9 +1,7 @@
-from typing import Optional, Any, List, Dict
+from typing import Optional, Any, List, Dict, TYPE_CHECKING
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
-from app.schemas.analysis import AnalysisResult
 import enum
-
 
 class DocumentType(str, enum.Enum):
     """Document types supported by the system."""
@@ -142,9 +140,9 @@ class Document(DocumentBase):
 
 class DocumentWithAnalysis(Document):
     """Schema for document with its analysis results."""
-    analysis_results: List[AnalysisResult] = Field(
+    analyses: List[Any] = Field(
         default_factory=list,
-        description="List of analysis results"
+        description="List of analyses performed on this document"
     )
 
     model_config = ConfigDict(
@@ -166,15 +164,26 @@ class DocumentWithAnalysis(Document):
                         "created_at": "2024-01-06T12:00:00Z"
                     }
                 ],
-                "analysis_results": [
+                "analyses": [
                     {
                         "id": "998e8400-e29b-41d4-a716-446655440000",
-                        "type": "text_extraction",
-                        "result": {
-                            "text": "Extracted text content",
-                            "pages": 5
-                        },
-                        "created_at": "2024-01-06T12:15:00Z"
+                        "type": "table_analysis",
+                        "mode": "automatic",
+                        "status": "completed",
+                        "created_at": "2024-01-06T12:15:00Z",
+                        "completed_at": "2024-01-06T12:20:00Z",
+                        "step_results": {
+                            "table_detection": {
+                                "status": "completed",
+                                "result": {
+                                    "tables_found": 2,
+                                    "locations": [
+                                        {"page": 1, "bbox": [100, 100, 500, 300]},
+                                        {"page": 2, "bbox": [150, 200, 550, 400]}
+                                    ]
+                                }
+                            }
+                        }
                     }
                 ]
             }

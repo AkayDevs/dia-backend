@@ -30,7 +30,10 @@ def verify_database_schema(db: Session) -> bool:
         inspector = inspect(db.bind)
         tables = inspector.get_table_names()
         
-        expected_tables = ['users', 'documents', 'analysis_results']
+        expected_tables = [
+            'users', 'documents', 'analysis_types', 'analysis_steps',
+            'algorithms', 'analyses', 'analysis_step_results'
+        ]
         missing_tables = set(expected_tables) - set(tables)
         
         if missing_tables:
@@ -43,21 +46,20 @@ def verify_database_schema(db: Session) -> bool:
         expected_doc_indexes = {
             'ix_documents_id',
             'ix_documents_name',
-            'ix_documents_user_id_uploaded_at'
+            'ix_documents_user_id_uploaded_at',
+            'ix_documents_type'
         }
         
         if not expected_doc_indexes.issubset(doc_indexes):
             logger.error(f"Missing document indexes: {expected_doc_indexes - doc_indexes}")
             return False
             
-        # Verify analysis_results table
-        analysis_info = get_table_info(inspector, 'analysis_results')
+        # Verify analysis tables
+        analysis_info = get_table_info(inspector, 'analyses')
         analysis_indexes = {idx['name'] for idx in analysis_info['indexes']}
         expected_analysis_indexes = {
-            'ix_analysis_results_id',
-            'ix_analysis_results_type',
-            'ix_analysis_results_document_id_type',
-            'ix_analysis_results_created_at'
+            'ix_analyses_document_id',
+            'ix_analyses_analysis_type_id'
         }
         
         if not expected_analysis_indexes.issubset(analysis_indexes):
@@ -102,7 +104,11 @@ def get_table_stats(db: Session) -> Dict[str, int]:
     """Get basic statistics about the tables."""
     try:
         stats = {}
-        for table in ['users', 'documents', 'analysis_results']:
+        tables = [
+            'users', 'documents', 'analysis_types', 'analysis_steps',
+            'algorithms', 'analyses', 'analysis_step_results'
+        ]
+        for table in tables:
             count = db.execute(
                 text(f"SELECT COUNT(*) FROM {table}")
             ).scalar()
@@ -110,7 +116,7 @@ def get_table_stats(db: Session) -> Dict[str, int]:
         return stats
     except Exception as e:
         logger.error(f"Error getting table stats: {e}")
-        return {} 
+        return {}
 
 
 def check_admin_user(db: Session) -> None:

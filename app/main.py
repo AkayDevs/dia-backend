@@ -19,6 +19,7 @@ import logging
 import uuid
 from starlette.middleware.base import BaseHTTPMiddleware
 from typing import Callable
+from app.db.init_analysis import init_analysis_db
 
 # Initialize logging
 setup_logging(env_mode=os.getenv("ENV", "development"))
@@ -111,6 +112,9 @@ async def on_startup():
     try:
         # Initialize database
         init_db(db)
+
+        # Initialize analysis database
+        init_analysis_db(db)
         
         # Ensure admin user exists first
         ensure_admin_exists(db)
