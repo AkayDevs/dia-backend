@@ -29,8 +29,6 @@ from app.crud.crud_tag import tag as crud_tag
 from app.schemas.document import (
     Document,
     DocumentCreate,
-    DocumentUpdate,
-    DocumentWithAnalysis,
     DocumentType,
     Tag as TagSchema,
     TagCreate
@@ -450,14 +448,14 @@ async def list_documents(
     )
 
 
-@router.get("/{document_id}", response_model=DocumentWithAnalysis)
+@router.get("/{document_id}", response_model=Document)
 async def get_document(
     document_id: str,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_verified_user),
-) -> DocumentWithAnalysis:
+) -> Document:
     """
-    Get a specific document with its analysis results.
+    Get a specific document.
     
     Args:
         document_id: Document ID
@@ -465,7 +463,7 @@ async def get_document(
         current_user: Currently authenticated user
         
     Returns:
-        Document with analysis results
+        Document
         
     Raises:
         HTTPException: If document is not found
