@@ -5,7 +5,7 @@ from typing import List, TYPE_CHECKING, Optional
 import uuid
 
 from app.db.base_class import Base
-from app.schemas.document import DocumentType
+from app.enums.document import DocumentType
 
 if TYPE_CHECKING:
     from app.db.models.user import User
@@ -49,10 +49,12 @@ class Document(Base):
     type: Mapped[DocumentType] = mapped_column(Enum(DocumentType), nullable=False)
     size: Mapped[int] = mapped_column(Integer, nullable=False)
     url: Mapped[str] = mapped_column(String, nullable=False)
+
+    previous_version_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    
     uploaded_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), nullable=False)
-    previous_version_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     archived_at: Mapped[Optional[DateTime]] = mapped_column(DateTime(timezone=True), nullable=True)
     retention_until: Mapped[Optional[DateTime]] = mapped_column(DateTime(timezone=True), nullable=True)

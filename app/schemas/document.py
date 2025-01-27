@@ -1,15 +1,11 @@
 from typing import Optional, Any, List, Dict, TYPE_CHECKING
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
-import enum
 
-class DocumentType(str, enum.Enum):
-    """Document types supported by the system."""
-    PDF = "pdf"
-    DOCX = "docx"
-    XLSX = "xlsx"
-    IMAGE = "image"
+from app.enums.document import DocumentType
 
+
+# Tag schema ---------------------------------------------------------------
 
 class TagBase(BaseModel):
     """Base schema for document tags."""
@@ -48,6 +44,8 @@ class Tag(TagBase):
         }
     )
 
+
+# Document schema ---------------------------------------------------------------
 
 class DocumentBase(BaseModel):
     """Base document schema with common attributes."""
