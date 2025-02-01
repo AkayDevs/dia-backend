@@ -6,11 +6,11 @@ from app.crud import crud_analysis
 from app.schemas.analysis import (
     AnalysisTypeCreate,
     AnalysisStepCreate,
-    AlgorithmCreate,
     Parameter
 )
-from app.db.models.analysis import AnalysisTypeEnum, AnalysisStepEnum
-from app.db.models.document import DocumentType
+from app.schemas.algorithm import AlgorithmCreate
+from app.enums.analysis import AnalysisTypeEnum, AnalysisStepEnum
+from app.enums.document import DocumentType
 
 logger = logging.getLogger(__name__)
 

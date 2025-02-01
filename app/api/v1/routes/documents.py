@@ -6,15 +6,13 @@ from fastapi import (
     UploadFile, 
     File, 
     status, 
-    Query, 
+    Query,
     BackgroundTasks,
     Form,
     Body
 )
 from sqlalchemy.orm import Session
 import uuid
-import os
-import shutil
 from datetime import datetime, timedelta
 import aiofiles
 import magic
@@ -29,37 +27,29 @@ from app.crud.crud_tag import tag as crud_tag
 from app.schemas.document import (
     Document,
     DocumentCreate,
-    DocumentType,
+    DocumentWithAnalysis,
     Tag as TagSchema,
     TagCreate
 )
 from app.db.models.document import Tag
 from app.db.models.user import User
+from app.enums.document import DocumentType, MIME_TYPES
+
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# MIME type mapping
-MIME_TYPES = {
-    'application/pdf': DocumentType.PDF,
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': DocumentType.DOCX,
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': DocumentType.XLSX,
-    'image/jpeg': DocumentType.IMAGE,
-    'image/png': DocumentType.IMAGE,
-}
 
 
 async def validate_and_save_file(
     file: UploadFile,
     user_id: str,
     background_tasks: BackgroundTasks
-) -> tuple[Document, str]:
+) -> DocumentCreate:
     """
     Validate and save an uploaded file.
-    Returns a tuple of (Document schema, file path).
     """
     try:
-        # Validate file size
         content = await file.read()
         size = len(content)
         await file.seek(0)
@@ -70,20 +60,16 @@ async def validate_and_save_file(
                 detail=f"File too large. Maximum size is {settings.MAX_UPLOAD_SIZE / 1024 / 1024}MB"
             )
 
-        # Create user-specific upload directory
         user_upload_dir = Path(settings.UPLOAD_DIR) / str(user_id)
         user_upload_dir.mkdir(parents=True, exist_ok=True)
 
-        # Generate unique filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{timestamp}_{uuid.uuid4().hex[:8]}_{file.filename}"
         file_path = user_upload_dir / filename
 
-        # Save file
         async with aiofiles.open(file_path, 'wb') as f:
             await f.write(content)
 
-        # Validate file type
         mime = magic.from_file(str(file_path), mime=True)
         if mime not in MIME_TYPES:
             raise HTTPException(
@@ -92,7 +78,7 @@ async def validate_and_save_file(
             )
 
         doc_type = MIME_TYPES[mime]
-        file_url = f"/uploads/{user_id}/{filename}"
+        file_url = f"/{settings.UPLOAD_DIR}/{user_id}/{filename}"
 
         document = DocumentCreate(
             name=file.filename,
@@ -101,7 +87,7 @@ async def validate_and_save_file(
             url=file_url,
         )
 
-        return document, str(file_path)
+        return document
 
     except Exception as e:
         if 'file_path' in locals():
@@ -125,7 +111,6 @@ async def cleanup_archived_file(file_path: Path):
         logger.error(f"Failed to cleanup archived file {file_path}: {str(e)}")
 
 
-# Tag Management Endpoints
 @router.get("/tag-list", response_model=List[TagSchema])
 async def list_tags(
     document_id: Optional[str] = Query(None, description="Get tags for specific document"),
@@ -137,20 +122,8 @@ async def list_tags(
 ) -> List[TagSchema]:
     """
     List tags with optional filtering.
-    
-    Args:
-        document_id: Optional document ID to get tags for a specific document
-        name_filter: Optional string to filter tags by name
-        skip: Number of records to skip
-        limit: Maximum number of records to return
-        db: Database session
-        current_user: Currently authenticated user
-        
-    Returns:
-        List of tags. If document_id is provided, returns tags for that document only.
     """
     if document_id:
-        # Get document and verify ownership
         document = crud_document.get(db, id=document_id)
         if not document:
             raise HTTPException(
@@ -164,7 +137,6 @@ async def list_tags(
             )
         return document.tags
         
-    # Return all tags with optional name filtering
     return crud_tag.get_multi(
         db,
         skip=skip,
@@ -181,7 +153,6 @@ async def create_tag(
     """
     Create a new tag.
     """
-    # Check if tag already exists
     existing_tag = crud_tag.get_by_name(db, name=tag_in.name)
     if existing_tag:
         raise HTTPException(
@@ -217,20 +188,7 @@ async def update_tag(
 ) -> TagSchema:
     """
     Update a tag's properties.
-    
-    Args:
-        tag_id: ID of the tag to update
-        tag_in: Updated tag data
-        db: Database session
-        current_user: Currently authenticated user
-        
-    Returns:
-        Updated tag
-        
-    Raises:
-        HTTPException: If tag is not found or name already exists
     """
-    # Check if tag exists
     tag = crud_tag.get(db, id=tag_id)
     if not tag:
         raise HTTPException(
@@ -238,7 +196,6 @@ async def update_tag(
             detail="Tag not found"
         )
     
-    # If name is being changed, check if new name already exists
     if tag_in.name != tag.name:
         existing_tag = crud_tag.get_by_name(db, name=tag_in.name)
         if existing_tag:
@@ -247,10 +204,8 @@ async def update_tag(
                 detail=f"Tag with name '{tag_in.name}' already exists"
             )
     
-    # Update tag
     return crud_tag.update(db, db_obj=tag, obj_in=tag_in) 
 
-# Document Tag Management
 @router.put("/{document_id}/tags", response_model=Document)
 async def update_document_tags(
     document_id: str,
@@ -261,7 +216,6 @@ async def update_document_tags(
     """
     Update tags for a specific document.
     """
-    # Check document exists and belongs to user
     document = crud_document.get(db, id=document_id)
     if not document:
         raise HTTPException(
@@ -274,7 +228,6 @@ async def update_document_tags(
             detail="Not enough permissions"
         )
     
-    # Validate tags exist
     for tag_id in tag_ids:
         if not crud_tag.get(db, id=tag_id):
             raise HTTPException(
@@ -282,10 +235,11 @@ async def update_document_tags(
                 detail=f"Tag with id {tag_id} not found"
             )
     
-    # Update document tags
     return crud_document.update_tags(db, db_obj=document, tag_ids=tag_ids)
 
-# Document Management Endpoints
+
+# Document Upload Endpoints --------------------------------------------------
+
 @router.post("", response_model=Document)
 async def upload_document(
     file: UploadFile = File(...),
@@ -305,13 +259,10 @@ async def upload_document(
             "tag_ids": tag_ids
         })
 
-        # Parse tag_ids from string to list of integers if provided
         parsed_tag_ids = None
         if tag_ids:
             try:
-                # Handle comma-separated string of tag IDs
                 parsed_tag_ids = [int(tid.strip()) for tid in tag_ids.split(',') if tid.strip()]
-                # Validate tags if provided
                 for tag_id in parsed_tag_ids:
                     if not crud_tag.get(db, id=tag_id):
                         raise HTTPException(
@@ -324,11 +275,10 @@ async def upload_document(
                     detail="Invalid tag_ids format. Expected comma-separated integers"
                 )
 
-        doc_create, _ = await validate_and_save_file(
+        doc_create = await validate_and_save_file(
             file, str(current_user.id), background_tasks
         )
         
-        # Add parsed tag IDs to document creation
         doc_create.tag_ids = parsed_tag_ids
         
         document = crud_document.create_with_user(
@@ -363,18 +313,6 @@ async def upload_documents(
 ) -> List[Document]:
     """
     Upload multiple documents in a batch.
-    
-    Args:
-        files: List of files to upload
-        background_tasks: Background tasks runner
-        db: Database session
-        current_user: Currently authenticated user
-        
-    Returns:
-        List of created documents
-        
-    Raises:
-        HTTPException: If any file fails validation or upload
     """
     if not files:
         raise HTTPException(
@@ -387,7 +325,7 @@ async def upload_documents(
 
     for file in files:
         try:
-            doc_create, file_path = await validate_and_save_file(
+            doc_create = await validate_and_save_file(
                 file, str(current_user.id), background_tasks
             )
             
@@ -426,17 +364,6 @@ async def list_documents(
 ) -> List[Document]:
     """
     List user's documents with optional filtering.
-    
-    Args:
-        tag_id: Filter by tag ID
-        doc_type: Filter by document type
-        skip: Number of records to skip
-        limit: Maximum number of records to return
-        db: Database session
-        current_user: Currently authenticated user
-        
-    Returns:
-        List of documents
     """
     return crud_document.get_multi_by_user(
         db=db,
@@ -448,25 +375,14 @@ async def list_documents(
     )
 
 
-@router.get("/{document_id}", response_model=Document)
+@router.get("/{document_id}", response_model=DocumentWithAnalysis)
 async def get_document(
     document_id: str,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_verified_user),
-) -> Document:
+) -> DocumentWithAnalysis:
     """
     Get a specific document.
-    
-    Args:
-        document_id: Document ID
-        db: Database session
-        current_user: Currently authenticated user
-        
-    Returns:
-        Document
-        
-    Raises:
-        HTTPException: If document is not found
     """
     try:
         logger.debug(f"Fetching document: {document_id}", extra={
@@ -507,18 +423,6 @@ async def delete_document(
 ) -> dict:
     """
     Delete a document and its associated file.
-    
-    Args:
-        document_id: Document ID
-        background_tasks: Background tasks runner
-        db: Database session
-        current_user: Currently authenticated user
-        
-    Returns:
-        Success message
-        
-    Raises:
-        HTTPException: If document is not found
     """
     document = crud_document.get_document_with_results(
         db=db,
@@ -553,28 +457,6 @@ async def update_document(
 ) -> Document:
     """
     Update a document's metadata and/or content.
-    
-    If a new file is provided, the current document will be archived and a new version created.
-    Archived documents are retained for ARCHIVE_RETENTION_DAYS days before being cleaned up.
-    If only metadata is provided (name and/or tags), the current document will be updated.
-    
-    Args:
-        document_id: Document ID to update
-        file: Optional new file content
-        name: Optional new name for the document
-        tag_ids: Optional comma-separated list of tag IDs (e.g., "1,2,3")
-        background_tasks: Background tasks runner
-        db: Database session
-        current_user: Currently authenticated user
-        
-    Returns:
-        Updated document or new document version
-        
-    Raises:
-        HTTPException: 
-            404: Document not found
-            403: Not enough permissions
-            400: Invalid tag format or no updates provided
     """
     try:
         # Validate document exists and user has permission
@@ -630,7 +512,7 @@ async def update_document(
         if file and file.filename:
             try:
                 # Validate and save the new file
-                doc_create, _ = await validate_and_save_file(
+                doc_create = await validate_and_save_file(
                     file, str(current_user.id), background_tasks
                 )
                 
@@ -734,19 +616,6 @@ async def get_document_versions(
 ) -> List[Document]:
     """
     Get version history of a document.
-    Returns a list of all versions of the document, including archived versions,
-    ordered from newest to oldest.
-    
-    Args:
-        document_id: Document ID to get versions for
-        db: Database session
-        current_user: Currently authenticated user
-        
-    Returns:
-        List of document versions
-        
-    Raises:
-        HTTPException: If document is not found or user lacks permission
     """
     try:
         # Get the initial document

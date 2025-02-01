@@ -8,7 +8,7 @@ from datetime import datetime
 from app.crud.base import CRUDBase
 from app.db.models.document import Document
 from app.db.models.document import Tag
-from app.schemas.document import DocumentCreate, DocumentUpdate, DocumentType
+from app.schemas.document import DocumentCreate, DocumentUpdate, DocumentType, DocumentWithAnalysis
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +133,7 @@ class CRUDDocument(CRUDBase[Document, DocumentCreate, DocumentUpdate]):
         *, 
         document_id: str, 
         user_id: str
-    ) -> Optional[Document]:
+    ) -> Optional[DocumentWithAnalysis]:
         """Get a document with its analysis results, ensuring user ownership."""
         try:
             return (

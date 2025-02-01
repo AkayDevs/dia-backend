@@ -1,32 +1,12 @@
 from sqlalchemy import Column, String, Integer, ForeignKey, JSON, Enum, Boolean, DateTime
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-import enum
 from typing import List
 from uuid import uuid4
+from app.enums.analysis import AnalysisTypeEnum, AnalysisStepEnum
 
 from app.db.base_class import Base
 
-class AnalysisTypeEnum(str, enum.Enum):
-    TABLE_ANALYSIS = "table_analysis"
-    TEXT_ANALYSIS = "text_analysis"
-    TEMPLATE_CONVERSION = "template_conversion"
-
-class AnalysisStepEnum(str, enum.Enum):
-    # Table Analysis Steps
-    TABLE_DETECTION = "table_detection"
-    TABLE_STRUCTURE_RECOGNITION = "table_structure_recognition"
-    TABLE_DATA_EXTRACTION = "table_data_extraction"
-    
-    # Text Analysis Steps
-    TEXT_DETECTION = "text_detection"
-    TEXT_RECOGNITION = "text_recognition"
-    TEXT_CLASSIFICATION = "text_classification"
-    
-    # Template Conversion Steps
-    TEMPLATE_DETECTION = "template_detection"
-    TEMPLATE_MATCHING = "template_matching"
-    TEMPLATE_EXTRACTION = "template_extraction"
 
 class AnalysisType(Base):
     __tablename__ = "analysis_types"
@@ -34,7 +14,7 @@ class AnalysisType(Base):
     id = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
     name = Column(Enum(AnalysisTypeEnum), nullable=False)
     description = Column(String(500))
-    supported_document_types = Column(JSON)  # List of supported DocumentType values
+    supported_document_types = Column(JSON)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     

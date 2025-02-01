@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
 
 from app.enums.document import DocumentType
+from app.schemas.analysis import Analysis as AnalysisResponseSchema
 
 
 # Tag schema ---------------------------------------------------------------
@@ -138,7 +139,7 @@ class Document(DocumentBase):
 
 class DocumentWithAnalysis(Document):
     """Schema for document with its analysis results."""
-    analyses: List[Any] = Field(
+    analyses: List[AnalysisResponseSchema] = Field(
         default_factory=list,
         description="List of analyses performed on this document"
     )

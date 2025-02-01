@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, desc
 from fastapi.encoders import jsonable_encoder
@@ -18,13 +18,13 @@ from app.schemas.analysis import (
     AnalysisTypeUpdate,
     AnalysisStepCreate,
     AnalysisStepUpdate,
-    AlgorithmCreate,
-    AlgorithmUpdate,
     AnalysisCreate,
     AnalysisUpdate,
     AnalysisStepResultCreate,
     AnalysisStepResultUpdate
 )
+
+from app.schemas.algorithm import AlgorithmCreate, AlgorithmUpdate
 
 logger = logging.getLogger(__name__)
 

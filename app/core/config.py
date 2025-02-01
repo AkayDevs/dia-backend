@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     
     # File Upload
     UPLOAD_DIR: str = "uploads"
-    MAX_UPLOAD_SIZE: int = 10 * 1024 * 1024  # 10MB
+    MAX_UPLOAD_SIZE: int = 40 * 1024 * 1024  # 40MB
     ALLOWED_EXTENSIONS: set[str] = {"pdf", "docx", "xlsx", "png", "jpg", "jpeg"}
     ALLOWED_MIME_TYPES: Dict[str, str] = {
         "pdf": "application/pdf",
