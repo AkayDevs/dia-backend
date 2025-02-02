@@ -6,6 +6,9 @@ from datetime import datetime
 
 
 class Parameter(BaseModel):
+    """
+    Standard parameter representation.
+    """
     name: str
     description: str
     type: str  # "string", "integer", "float", "boolean", "array", "object"
@@ -16,6 +19,9 @@ class Parameter(BaseModel):
     allowed_values: Optional[List[Any]] = None
 
 class AlgorithmBase(BaseModel):
+    """
+    Standard algorithm representation.
+    """
     name: str
     description: Optional[str] = None
     version: str
@@ -24,12 +30,21 @@ class AlgorithmBase(BaseModel):
     is_active: bool = True
 
 class AlgorithmCreate(AlgorithmBase):
+    """
+    Algorithm creation schema.
+    """
     step_id: UUID
 
 class AlgorithmUpdate(AlgorithmBase):
+    """
+    Algorithm update schema.
+    """
     pass
 
 class Algorithm(AlgorithmBase):
+    """
+    Algorithm representation.
+    """
     id: UUID
     step_id: UUID
     created_at: datetime

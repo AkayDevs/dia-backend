@@ -1,6 +1,5 @@
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field, validator
-from enum import Enum
 
 class BoundingBox(BaseModel):
     """Standard bounding box representation in pixels."""
