@@ -188,3 +188,50 @@ class DocumentWithAnalysis(Document):
             }
         }
     )
+
+
+class DocumentPage(BaseModel):
+    """Schema for a document page."""
+    page_number: int = Field(..., ge=1, description="Page number")
+    width: int = Field(..., gt=0, description="Page width in pixels")
+    height: int = Field(..., gt=0, description="Page height in pixels")
+    image_url: str = Field(..., description="URL to the page image")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "page_number": 1,
+                "width": 800,
+                "height": 1200,
+                "image_url": "/uploads/123/page_1.png"
+            }
+        }
+    )
+
+
+class DocumentPages(BaseModel):
+    """Schema for document pages response."""
+    total_pages: int = Field(..., ge=0, description="Total number of pages")
+    pages: List[DocumentPage] = Field(..., description="List of document pages")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "total_pages": 2,
+                "pages": [
+                    {
+                        "page_number": 1,
+                        "width": 800,
+                        "height": 1200,
+                        "image_url": "/uploads/123/page_1.png"
+                    },
+                    {
+                        "page_number": 2,
+                        "width": 800,
+                        "height": 1200,
+                        "image_url": "/uploads/123/page_2.png"
+                    }
+                ]
+            }
+        }
+    )

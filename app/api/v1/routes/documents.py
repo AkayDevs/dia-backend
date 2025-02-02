@@ -29,11 +29,13 @@ from app.schemas.document import (
     DocumentCreate,
     DocumentWithAnalysis,
     Tag as TagSchema,
-    TagCreate
+    TagCreate,
+    DocumentPages
 )
 from app.db.models.document import Tag
 from app.db.models.user import User
 from app.enums.document import DocumentType, MIME_TYPES
+from app.utils.document import extract_document_pages
 
 
 router = APIRouter()
@@ -660,4 +662,56 @@ async def get_document_versions(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve document versions"
+        ) 
+
+@router.get("/{document_id}/pages", response_model=DocumentPages)
+async def get_document_pages(
+    document_id: str,
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_verified_user),
+) -> DocumentPages:
+    """
+    Get the pages of a document as an array of images.
+    Each page is converted to a PNG image and returned with its dimensions.
+    """
+    try:
+        logger.info(f"Fetching pages for document: {document_id}", extra={
+            "user_id": str(current_user.id)
+        })
+        
+        # Get document and verify ownership
+        document = crud_document.get(db, id=document_id)
+        if not document:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Document not found"
+            )
+        if str(document.user_id) != str(current_user.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not enough permissions"
+            )
+        
+        # Extract pages from document
+        pages = await extract_document_pages(
+            document_path=document.url,
+            document_type=document.type,
+            user_id=str(current_user.id)
+        )
+        
+        logger.info(f"Successfully extracted {pages.total_pages} pages from document: {document_id}", extra={
+            "user_id": str(current_user.id)
+        })
+        return pages
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting document pages: {str(e)}", extra={
+            "user_id": str(current_user.id),
+            "document_id": document_id
+        })
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get document pages: {str(e)}"
         ) 
