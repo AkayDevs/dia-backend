@@ -23,7 +23,6 @@ from app.schemas.analysis import (
     AnalysisStepResultCreate,
     AnalysisStepResultUpdate
 )
-
 from app.schemas.algorithm import AlgorithmCreate, AlgorithmUpdate
 
 logger = logging.getLogger(__name__)
@@ -32,8 +31,27 @@ class CRUDAnalysisType(CRUDBase[AnalysisType, AnalysisTypeCreate, AnalysisTypeUp
     def get_with_steps(self, db: Session, id: str) -> Optional[AnalysisType]:
         return db.query(self.model).filter(self.model.id == id).first()
 
-    def get_by_name(self, db: Session, name: str) -> Optional[AnalysisType]:
-        return db.query(self.model).filter(self.model.name == name).first()
+    def get_by_code(self, db: Session, code: str) -> Optional[AnalysisType]:
+        return db.query(self.model).filter(self.model.code == code).first()
+    
+    def get_by_code_and_version(
+        self, db: Session, code: str, version: str
+    ) -> Optional[AnalysisType]:
+        return (
+            db.query(self.model)
+            .filter(
+                self.model.code == code,
+                self.model.version == version
+            )
+            .first()
+        )
+    
+    def get_active_types(self, db: Session) -> List[AnalysisType]:
+        return (
+            db.query(self.model)
+            .filter(self.model.is_active == True)
+            .all()
+        )
 
 class CRUDAnalysisStep(CRUDBase[AnalysisStep, AnalysisStepCreate, AnalysisStepUpdate]):
     def get_by_analysis_type(
@@ -41,19 +59,37 @@ class CRUDAnalysisStep(CRUDBase[AnalysisStep, AnalysisStepCreate, AnalysisStepUp
     ) -> List[AnalysisStep]:
         return (
             db.query(self.model)
-            .filter(self.model.analysis_type_id == analysis_type_id)
+            .filter(
+                self.model.analysis_type_id == analysis_type_id,
+                self.model.is_active == True
+            )
             .order_by(self.model.order)
             .all()
         )
 
-    def get_by_name(
-        self, db: Session, name: str, analysis_type_id: str
+    def get_by_code(
+        self, db: Session, code: str, analysis_type_id: str
     ) -> Optional[AnalysisStep]:
         return (
             db.query(self.model)
             .filter(
-                self.model.name == name,
-                self.model.analysis_type_id == analysis_type_id
+                self.model.code == code,
+                self.model.analysis_type_id == analysis_type_id,
+                self.model.is_active == True
+            )
+            .first()
+        )
+    
+    def get_by_code_and_version(
+        self, db: Session, code: str, version: str, analysis_type_id: str
+    ) -> Optional[AnalysisStep]:
+        return (
+            db.query(self.model)
+            .filter(
+                self.model.code == code,
+                self.model.version == version,
+                self.model.analysis_type_id == analysis_type_id,
+                self.model.is_active == True
             )
             .first()
         )
@@ -69,14 +105,29 @@ class CRUDAlgorithm(CRUDBase[Algorithm, AlgorithmCreate, AlgorithmUpdate]):
             .all()
         )
 
-    def get_by_name_and_version(
-        self, db: Session, name: str, version: str
+    def get_by_code_and_version(
+        self, db: Session, code: str, version: str, step_id: str
     ) -> Optional[Algorithm]:
         return (
             db.query(self.model)
             .filter(
-                self.model.name == name,
-                self.model.version == version
+                self.model.code == code,
+                self.model.version == version,
+                self.model.step_id == step_id,
+                self.model.is_active == True
+            )
+            .first()
+        )
+    
+    def get_default_for_step(
+        self, db: Session, step_id: str
+    ) -> Optional[Algorithm]:
+        """Get the default (first active) algorithm for a step"""
+        return (
+            db.query(self.model)
+            .filter(
+                self.model.step_id == step_id,
+                self.model.is_active == True
             )
             .first()
         )
@@ -94,51 +145,60 @@ class CRUDAnalysis(CRUDBase[Analysis, AnalysisCreate, AnalysisUpdate]):
         db.add(db_obj)
         db.flush()  # Get the ID without committing
 
-        # Get all steps for this analysis type
+        # Get all active steps for this analysis type
         steps = db.query(AnalysisStep).filter(
-            AnalysisStep.analysis_type_id == str(obj_in.analysis_type_id)
+            AnalysisStep.analysis_type_id == str(obj_in.analysis_type_id),
+            AnalysisStep.is_active == True
         ).order_by(AnalysisStep.order).all()
 
         # Create step results
         for step in steps:
             step_config = algorithm_configs.get(str(step.id), {})
             
-            # If no algorithm specified, get the first active algorithm for this step
-            algorithm_id = step_config.get("algorithm_id")
-            if not algorithm_id:
-                default_algorithm = db.query(Algorithm).filter(
-                    Algorithm.step_id == step.id,
-                    Algorithm.is_active == True
-                ).first()
-                if default_algorithm:
-                    algorithm_id = default_algorithm.id
-                    
-                    # Get default parameters from the algorithm
-                    parameters = {}
-                    for param in default_algorithm.parameters:
-                        if isinstance(param, dict) and param.get('default') is not None:
-                            parameters[param['name']] = param['default']
-                else:
-                    # Log warning if no active algorithm found
-                    logger.warning(f"No active algorithm found for step {step.id}")
-                    continue
-            else:
-                # If algorithm is specified but no parameters, get defaults
+            # Get algorithm based on configuration
+            algorithm_id = None
+            parameters = {}
+            
+            if "algorithm_code" in step_config and "algorithm_version" in step_config:
+                # Find algorithm by code and version
                 algorithm = db.query(Algorithm).filter(
-                    Algorithm.id == algorithm_id,
+                    Algorithm.step_id == step.id,
+                    Algorithm.code == step_config["algorithm_code"],
+                    Algorithm.version == step_config["algorithm_version"],
                     Algorithm.is_active == True
                 ).first()
                 if algorithm:
+                    algorithm_id = algorithm.id
                     parameters = step_config.get("parameters", {})
                     # Add any missing parameters with their defaults
                     for param in algorithm.parameters:
                         if isinstance(param, dict) and param['name'] not in parameters and param.get('default') is not None:
                             parameters[param['name']] = param['default']
                 else:
-                    # Log warning if specified algorithm not found or not active
-                    logger.warning(f"Specified algorithm {algorithm_id} not found or not active")
+                    logger.warning(
+                        f"Specified algorithm {step_config['algorithm_code']} "
+                        f"v{step_config['algorithm_version']} not found or not active"
+                    )
+            
+            # If no algorithm specified or found, get the default
+            if not algorithm_id:
+                default_algorithm = db.query(Algorithm).filter(
+                    Algorithm.step_id == step.id,
+                    Algorithm.is_active == True
+                ).first()
+                
+                if default_algorithm:
+                    algorithm_id = default_algorithm.id
+                    # Get default parameters
+                    parameters = {}
+                    for param in default_algorithm.parameters:
+                        if isinstance(param, dict) and param.get('default') is not None:
+                            parameters[param['name']] = param['default']
+                else:
+                    logger.warning(f"No active algorithm found for step {step.id}")
                     continue
 
+            # Create step result
             step_result = AnalysisStepResult(
                 analysis_id=db_obj.id,
                 step_id=step.id,
@@ -158,6 +218,7 @@ class CRUDAnalysis(CRUDBase[Analysis, AnalysisCreate, AnalysisUpdate]):
         return (
             db.query(self.model)
             .filter(self.model.document_id == document_id)
+            .order_by(desc(self.model.created_at))
             .all()
         )
 
@@ -188,23 +249,15 @@ class CRUDAnalysis(CRUDBase[Analysis, AnalysisCreate, AnalysisUpdate]):
         skip: int = 0,
         limit: int = 100
     ) -> List[Analysis]:
-        """
-        Get multiple analysis records with filtering options.
-        
-        Args:
-            db: Database session
-            filters: Dictionary of filter conditions
-            skip: Number of records to skip
-            limit: Maximum number of records to return
-            
-        Returns:
-            List of Analysis objects matching the filter criteria
-        """
         query = db.query(self.model)
         
         # Join with Document if we need to filter by document type
         if "document_type" in filters:
             query = query.join(Analysis.document)
+            
+        # Join with AnalysisType if we need to filter by analysis type code
+        if "analysis_type_code" in filters:
+            query = query.join(Analysis.analysis_type)
         
         # Build filter conditions
         conditions = []
@@ -217,6 +270,9 @@ class CRUDAnalysis(CRUDBase[Analysis, AnalysisCreate, AnalysisUpdate]):
             
         if "analysis_type_id" in filters:
             conditions.append(Analysis.analysis_type_id == filters["analysis_type_id"])
+            
+        if "analysis_type_code" in filters:
+            conditions.append(Analysis.analysis_type.has(code=filters["analysis_type_code"]))
             
         if "document_type" in filters:
             conditions.append(Analysis.document.has(type=filters["document_type"]))
@@ -245,7 +301,9 @@ class CRUDAnalysisStepResult(CRUDBase[AnalysisStepResult, AnalysisStepResultCrea
     ) -> List[AnalysisStepResult]:
         return (
             db.query(self.model)
+            .join(AnalysisStep)
             .filter(self.model.analysis_id == analysis_id)
+            .order_by(AnalysisStep.order)
             .all()
         )
 

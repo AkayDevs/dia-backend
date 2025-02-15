@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, ForeignKey, JSON, Enum, Boolean, DateTime
+from sqlalchemy import Column, String, Integer, ForeignKey, JSON, Enum, Boolean, DateTime, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from typing import List
@@ -12,54 +12,76 @@ class AnalysisType(Base):
     __tablename__ = "analysis_types"
     
     id = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    name = Column(Enum(AnalysisTypeEnum), nullable=False)
+    code = Column(String(100), nullable=False, unique=True)  # Identifier code from registry
+    name = Column(String(100), nullable=False)
+    version = Column(String(20), nullable=False)
     description = Column(String(500))
     supported_document_types = Column(JSON)
+    implementation_path = Column(String(255), nullable=False)  # Path to implementation class
+    is_active = Column(Boolean, nullable=False, server_default='1')  # Match database schema
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # Relationships
     steps = relationship("AnalysisStep", back_populates="analysis_type", cascade="all, delete-orphan")
     analyses = relationship("Analysis", back_populates="analysis_type")
+    
+    __table_args__ = (
+        # Ensure unique combination of code and version
+        UniqueConstraint('code', 'version', name='uix_analysis_type_code_version'),
+    )
 
 class AnalysisStep(Base):
     __tablename__ = "analysis_steps"
     
     id = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    name = Column(Enum(AnalysisStepEnum), nullable=False)
+    code = Column(String(100), nullable=False)  # Identifier code from registry
+    name = Column(String(100), nullable=False)
+    version = Column(String(20), nullable=False)
     description = Column(String(500))
     order = Column(Integer, nullable=False)  # Order in the analysis pipeline
     analysis_type_id = Column(String(36), ForeignKey("analysis_types.id"), nullable=False)
+    result_schema = Column(String(255), nullable=False)  # Python path to result schema class
+    base_parameters = Column(JSON)  # List of Parameter objects
+    implementation_path = Column(String(255), nullable=False)  # Path to implementation class
+    is_active = Column(Boolean, nullable=False, server_default='1')  # Match database schema
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
-    # Base parameters that all algorithms for this step must support
-    base_parameters = Column(JSON)  # List of Parameter objects
     
     # Relationships
     analysis_type = relationship("AnalysisType", back_populates="steps")
     algorithms = relationship("Algorithm", back_populates="step", cascade="all, delete-orphan")
     step_results = relationship("AnalysisStepResult", back_populates="step")
+    
+    __table_args__ = (
+        # Ensure unique combination of code and version within an analysis type
+        UniqueConstraint('analysis_type_id', 'code', 'version', name='uix_step_analysis_code_version'),
+    )
 
 class Algorithm(Base):
     __tablename__ = "algorithms"
     
     id = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    code = Column(String(100), nullable=False)  # Identifier code from registry
     name = Column(String(100), nullable=False)
     description = Column(String(500))
     version = Column(String(20), nullable=False)
     step_id = Column(String(36), ForeignKey("analysis_steps.id"), nullable=False)
     supported_document_types = Column(JSON)  # List of supported DocumentType values
-    is_active = Column(Boolean, default=True)
+    parameters = Column(JSON)  # List of Parameter objects
+    implementation_path = Column(String(255), nullable=False)  # Path to implementation class
+    is_active = Column(Boolean, nullable=False, server_default='1')  # Match database schema
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
-    # Algorithm-specific parameters in addition to base parameters
-    parameters = Column(JSON)  # List of Parameter objects
     
     # Relationships
     step = relationship("AnalysisStep", back_populates="algorithms")
     step_results = relationship("AnalysisStepResult", back_populates="algorithm")
+    
+    __table_args__ = (
+        # Ensure unique combination of code and version within a step
+        UniqueConstraint('step_id', 'code', 'version', name='uix_algorithm_step_code_version'),
+    )
 
 class Analysis(Base):
     __tablename__ = "analyses"
