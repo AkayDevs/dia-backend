@@ -46,4 +46,6 @@ class TableAnalysis(BaseAnalysis):
         pass
 
 # Register the analysis type
+
+print("Registering Table Analysis")
 AnalysisRegistry.register_analysis_type(TableAnalysis().get_info()) 

@@ -51,20 +51,23 @@ class AnalysisTypeBase(BaseModel):
     Standard analysis type representation.
     """
     name: AnalysisTypeEnum
+    code: str
+    version: str
     description: Optional[str] = None
     supported_document_types: List[DocumentType]
+    implementation_path: str
 
 class AnalysisTypeCreate(AnalysisTypeBase):
     """
     Analysis type creation schema.
     """
-    pass
+    is_active: bool
 
 class AnalysisTypeUpdate(AnalysisTypeBase):
     """
     Analysis type update schema.
     """
-    pass
+    is_active: bool
 
 class AnalysisType(AnalysisTypeBase):
     """
@@ -73,11 +76,22 @@ class AnalysisType(AnalysisTypeBase):
     id: UUID
     created_at: datetime
     updated_at: Optional[datetime] = None
-    steps: List[AnalysisStep] = []
+    is_active: bool
 
     class Config:
         from_attributes = True
 
+class AnalysisTypeWithSteps(AnalysisType):
+    """
+    Analysis type representation with steps.
+    """
+    steps: List[AnalysisStep] = []
+
+class AnalysisTypeWithAnalyses(AnalysisType):
+    """
+    Analysis type representation with analyses.
+    """
+    analyses: List[Any] = []
 
 # Analysis Step Result Schemas ------------------------------------------------------------
 
