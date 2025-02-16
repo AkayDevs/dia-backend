@@ -13,17 +13,21 @@ from app.db.models.analysis import (
     Analysis,
     AnalysisStepResult
 )
-from app.schemas.analysis import (
+from app.analysis.schemas.types import (
     AnalysisTypeCreate,
     AnalysisTypeUpdate,
+    Analysis as AnalysisSchema,
+    AnalysisConfig
+)
+from app.analysis.schemas.steps import (
     AnalysisStepCreate,
     AnalysisStepUpdate,
-    AnalysisCreate,
-    AnalysisUpdate,
-    AnalysisStepResultCreate,
-    AnalysisStepResultUpdate
+    AnalysisStepResult as AnalysisStepResultSchema
 )
-from app.schemas.algorithm import AlgorithmCreate, AlgorithmUpdate
+from app.analysis.schemas.algorithms import (
+    AlgorithmCreate,
+    AlgorithmUpdate
+)
 
 logger = logging.getLogger(__name__)
 
@@ -132,12 +136,12 @@ class CRUDAlgorithm(CRUDBase[Algorithm, AlgorithmCreate, AlgorithmUpdate]):
             .first()
         )
 
-class CRUDAnalysis(CRUDBase[Analysis, AnalysisCreate, AnalysisUpdate]):
+class CRUDAnalysis(CRUDBase[Analysis, AnalysisSchema, AnalysisConfig]):
     def create_with_steps(
         self,
         db: Session,
         *,
-        obj_in: AnalysisCreate,
+        obj_in: AnalysisSchema,
         algorithm_configs: Dict[str, Dict[str, Any]]
     ) -> Analysis:
         obj_in_data = jsonable_encoder(obj_in)
@@ -295,7 +299,7 @@ class CRUDAnalysis(CRUDBase[Analysis, AnalysisCreate, AnalysisUpdate]):
         
         return query.all()
 
-class CRUDAnalysisStepResult(CRUDBase[AnalysisStepResult, AnalysisStepResultCreate, AnalysisStepResultUpdate]):
+class CRUDAnalysisStepResult(CRUDBase[AnalysisStepResult, AnalysisStepResultSchema, AnalysisStepResultSchema]):
     def get_by_analysis(
         self, db: Session, analysis_id: str
     ) -> List[AnalysisStepResult]:

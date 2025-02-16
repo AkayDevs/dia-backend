@@ -4,8 +4,9 @@ import pkgutil
 from sqlalchemy.orm import Session
 from app.analysis.registry.registry import AnalysisRegistry
 from app.crud import crud_analysis
-from app.schemas.analysis import AnalysisTypeCreate, AnalysisStepCreate, AnalysisTypeUpdate, AnalysisStepUpdate
-from app.schemas.algorithm import AlgorithmCreate
+from app.analysis.schemas.types import AnalysisTypeCreate, AnalysisTypeUpdate
+from app.analysis.schemas.steps import AnalysisStepCreate, AnalysisStepUpdate
+from app.analysis.schemas.algorithms import AlgorithmCreate
 
 logger = logging.getLogger(__name__)
 
@@ -59,10 +60,8 @@ def init_analysis_db(db: Session) -> None:
                         is_active=True
                     )
                 )
-
-            # Update existing type if needed
-            elif db_analysis_type.is_active != analysis_type.is_active or db_analysis_type.version != analysis_type.identifier.version:
-
+            else:
+                # Update existing type if needed
                 logger.info(
                     f"Updating analysis type: {analysis_type.identifier.name} "
                     f"v{analysis_type.identifier.version}"
@@ -71,9 +70,7 @@ def init_analysis_db(db: Session) -> None:
                     db,
                     db_obj=db_analysis_type,
                     obj_in=AnalysisTypeUpdate(
-                        code=analysis_type.identifier.code,
                         name=analysis_type.identifier.name,
-                        version=analysis_type.identifier.version,
                         description=analysis_type.description,
                         supported_document_types=analysis_type.supported_document_types,
                         implementation_path=analysis_type.implementation_path,
@@ -119,15 +116,15 @@ def init_analysis_db(db: Session) -> None:
                     crud_analysis.analysis_step.update(
                         db,
                         db_obj=db_step,
-                        obj_in={
-                            "name": step.identifier.name,
-                            "description": step.description,
-                            "order": step.order,
-                            "base_parameters": step.base_parameters,
-                            "result_schema": step.result_schema,
-                            "implementation_path": step.implementation_path,
-                            "is_active": True
-                        }
+                        obj_in=AnalysisStepUpdate(
+                            name=step.identifier.name,
+                            description=step.description,
+                            order=step.order,
+                            base_parameters=step.base_parameters,
+                            result_schema=step.result_schema,
+                            implementation_path=step.implementation_path,
+                            is_active=True
+                        )
                     )
                 
                 # Create or update algorithms
