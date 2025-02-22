@@ -1,30 +1,27 @@
-
-from app.analysis.base.base_step import BaseStep
-from app.analysis.registry.components import AnalysisStepInfo, AnalysisIdentifier
-from app.schemas.analysis import Parameter, AnalysisStepResult
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+from app.services.analysis.configs.base.base_step import BaseStep
+from app.schemas.analysis.configs.steps import StepDefinitionInfo
+from app.schemas.analysis.configs.algorithms import AlgorithmParameter
 
 class TableStructureStep(BaseStep):
     """Table structure step implementation"""
     
-    def get_info(self) -> AnalysisStepInfo:
-        return AnalysisStepInfo(
-            identifier=AnalysisIdentifier(
-                name="Table Structure",
-                code="table_structure",
-                version="1.0.0"
-            ),
+    def get_info(self) -> StepDefinitionInfo:
+        return StepDefinitionInfo(
+            code="table_structure",
+            name="Table Structure",
+            version="1.0.0",
             description="Extract table structure from the detected tables",
             order=2,
             base_parameters=[
-                Parameter(
+                AlgorithmParameter(
                     name="consider_headers",
                     description="Whether to consider headers in the table structure",
                     type="boolean",
                     required=False,
                     default=True
                 ),
-                Parameter(
+                AlgorithmParameter(
                     name="consider_merged_cells",
                     description="Whether to consider merged cells in the table structure",
                     type="boolean",
@@ -32,25 +29,42 @@ class TableStructureStep(BaseStep):
                     default=True
                 )
             ],
-            result_schema="app.schemas.results.table_structure.TableStructureOutput",
-            algorithms=[]
+            result_schema_path="app.schemas.analysis.results.table_structure.TableStructureResult",
+            implementation_path="app.services.analysis.configs.definitions.table_analysis.steps.table_structure.TableStructureStep",
+            is_active=True
         )
     
-    async def validate_input(self, input_data: Dict[str, Any]) -> bool:
-        """Validate the input data for the step"""
-        return True
+    async def validate_requirements(self) -> None:
+        """Validate that all required dependencies are available"""
+        pass
     
-    async def validate_result(self, result: Dict[str, Any]) -> bool:
-        """Validate the result of the step"""
-        return True
+    async def validate_input(self, input_data: Dict[str, Any]) -> None:
+        """Validate input data format"""
+        if not input_data.get("tables"):
+            raise ValueError("No tables provided in input data")
     
-    async def prepare_step(self, previous_result: Optional[AnalysisStepResult] = None) -> Dict[str, Any]:
+    async def validate_result(self, result: Dict[str, Any]) -> None:
+        """Validate step execution result"""
+        if not result.get("structures"):
+            raise ValueError("No table structures detected in the result")
+    
+    async def prepare_execution(self, document_path: str, previous_results: Dict[str, Dict[str, Any]] = {}) -> Dict[str, Any]:
         """Prepare data for step execution"""
-        if previous_result:
-            return previous_result.result
-        return {}
+        table_detection_results = previous_results.get("table_detection", {})
+        return {
+            "document_path": document_path,
+            "tables": table_detection_results.get("tables", []),
+            "previous_results": previous_results
+        }
+    
+    async def post_process_result(self, result: Dict[str, Any], previous_results: Dict[str, Dict[str, Any]] = {}) -> Dict[str, Any]:
+        """Post-process algorithm execution result"""
+        return {
+            "structures": result.get("structures", []),
+            "metadata": result.get("metadata", {})
+        }
     
     async def cleanup(self) -> None:
-        """Cleanup temporary resources"""
+        """Cleanup any temporary resources"""
         pass
         

@@ -1,148 +1,126 @@
 from typing import Dict, Any
 import cv2
 import numpy as np
-from app.analysis.base.base_algorithm import BaseAlgorithm
-from app.analysis.registry.components import AlgorithmInfo, AnalysisIdentifier
-from app.schemas.analysis import Parameter
+from app.services.analysis.configs.base.base_algorithm import BaseAlgorithm
+from app.schemas.analysis.configs.algorithms import AlgorithmDefinitionInfo, AlgorithmParameter
 from app.enums.document import DocumentType
-from app.schemas.results.table_detection import (
-    TableDetectionOutput,
-    TableDetectionResult,
-    TableLocation,
-    BoundingBox,
-    Confidence,
-    PageInfo
-)
+from app.schemas.analysis.results.table_detection import TableDetectionResult
 
 class BasicTableDetectionAlgorithm(BaseAlgorithm):
     """Basic table detection using OpenCV"""
     
-    def get_info(self) -> AlgorithmInfo:
-        return AlgorithmInfo(
-            identifier=AnalysisIdentifier(
-                name="Basic Table Detection",
-                code="basic_detection",
-                version="1.0.0"
-            ),
+    def get_info(self) -> AlgorithmDefinitionInfo:
+        return AlgorithmDefinitionInfo(
+            code="basic_detection",
+            name="Basic Table Detection",
+            version="1.0.0",
             description="Basic table detection using OpenCV contour detection",
             supported_document_types=[DocumentType.PDF, DocumentType.IMAGE],
             parameters=[
-                Parameter(
+                AlgorithmParameter(
                     name="max_tables",
                     description="Maximum number of tables to detect per page",
                     type="integer",
                     required=False,
                     default=10,
-                    min_value=1,
-                    max_value=50
+                    constraints={
+                        "min": 1,
+                        "max": 50
+                    }
                 ),
-                Parameter(
+                AlgorithmParameter(
                     name="min_table_size",
                     description="Minimum table size as percentage of page size",
                     type="float",
                     required=False,
                     default=0.05,
-                    min_value=0.01,
-                    max_value=1.0
+                    constraints={
+                        "min": 0.01,
+                        "max": 1.0
+                    }
                 )
             ],
-            implementation_path="app.analysis.types.table_analysis.algorithms.basic_detection.BasicTableDetectionAlgorithm"
+            implementation_path="app.services.analysis.configs.definitions.table_analysis.algorithms.basic_detection.BasicTableDetectionAlgorithm",
+            is_active=True
         )
     
-    async def validate_requirements(self) -> bool:
-        """Validate dependencies"""
+    async def validate_requirements(self) -> None:
+        """Validate that all required dependencies are available"""
         try:
             import cv2
             import numpy as np
-            return True
-        except ImportError:
-            return False
+        except ImportError as e:
+            raise RuntimeError(f"Required dependency not found: {str(e)}")
     
-    async def validate_parameters(self, parameters: Dict[str, Any]) -> bool:
-        """Validate algorithm parameters"""
-        try:
-            max_tables = parameters.get("max_tables", 10)
-            min_table_size = parameters.get("min_table_size", 0.05)
-            
-            if not (1 <= max_tables <= 50):
-                return False
-            if not (0.01 <= min_table_size <= 1.0):
-                return False
-            
-            return True
-        except Exception:
-            return False
+    async def validate_input(self, input_data: Dict[str, Any]) -> None:
+        """Validate input data format"""
+        if "document_path" not in input_data:
+            raise ValueError("Document path not provided in input data")
     
-    async def execute(self, input_data: Dict[str, Any], parameters: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(
+        self,
+        document_path: str,
+        parameters: Dict[str, Any],
+        previous_results: Dict[str, Dict[str, Any]] = {}
+    ) -> Dict[str, Any]:
         """Execute table detection"""
         try:
-            # Get parameters
+            # Get parameters with defaults
             max_tables = parameters.get("max_tables", 10)
             min_table_size = parameters.get("min_table_size", 0.05)
             
-            # Process each page
-            results = []
-            total_tables = 0
+            # Process document
+            image = cv2.imread(document_path)
+            if image is None:
+                raise ValueError(f"Could not read image from {document_path}")
+                
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             
-            for page_data in input_data["pages"]:
-                # Convert image to grayscale
-                image = cv2.imread(page_data["image_path"])
-                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-                
-                # Detect tables using contours
-                tables = self._detect_tables(gray, min_table_size)
-                
-                # Limit number of tables
-                tables = tables[:max_tables]
-                total_tables += len(tables)
-                
-                # Create result for this page
-                page_result = TableDetectionResult(
-                    page_info=PageInfo(
-                        page_number=page_data["page_number"],
-                        width=image.shape[1],
-                        height=image.shape[0]
-                    ),
-                    tables=[
-                        TableLocation(
-                            bbox=BoundingBox(
-                                x1=int(bbox[0]),
-                                y1=int(bbox[1]),
-                                x2=int(bbox[2]),
-                                y2=int(bbox[3])
-                            ),
-                            confidence=Confidence(
-                                score=confidence,
-                                method="contour_detection"
-                            ),
-                            table_type="bordered" if is_bordered else "borderless"
-                        )
-                        for bbox, confidence, is_bordered in tables
-                    ],
-                    processing_info={
+            # Detect tables
+            tables = self._detect_tables(gray, min_table_size)
+            tables = tables[:max_tables]  # Limit number of tables
+            
+            # Format results
+            result = {
+                "tables": [
+                    {
+                        "bbox": {
+                            "x1": int(bbox[0]),
+                            "y1": int(bbox[1]),
+                            "x2": int(bbox[2]),
+                            "y2": int(bbox[3])
+                        },
+                        "confidence": {
+                            "score": float(confidence),
+                            "method": "contour_detection"
+                        },
+                        "type": "bordered" if is_bordered else "borderless"
+                    }
+                    for bbox, confidence, is_bordered in tables
+                ],
+                "page_info": {
+                    "width": image.shape[1],
+                    "height": image.shape[0],
+                    "dpi": 300  # Default DPI
+                },
+                "metadata": {
+                    "algorithm": "basic_detection",
+                    "version": "1.0.0",
+                    "parameters": parameters,
+                    "processing_info": {
                         "threshold_method": "adaptive",
                         "min_table_size": min_table_size
                     }
-                )
-                results.append(page_result)
-            
-            # Create final output
-            return TableDetectionOutput(
-                total_pages_processed=len(input_data["pages"]),
-                total_tables_found=total_tables,
-                results=results,
-                metadata={
-                    "algorithm": "basic_detection",
-                    "version": "1.0.0",
-                    "parameters": parameters
                 }
-            ).dict()
+            }
+            
+            return result
             
         except Exception as e:
-            raise Exception(f"Table detection failed: {str(e)}")
+            raise RuntimeError(f"Table detection failed: {str(e)}")
     
     async def cleanup(self) -> None:
-        """Cleanup temporary resources"""
+        """Cleanup any temporary resources"""
         pass
     
     def _detect_tables(
@@ -154,11 +132,53 @@ class BasicTableDetectionAlgorithm(BaseAlgorithm):
         Detect tables in grayscale image
         Returns list of (bbox, confidence, is_bordered) tuples
         """
-        # Implementation here - this is just a placeholder
-        # In a real implementation, you would:
-        # 1. Apply adaptive thresholding
-        # 2. Find contours
-        # 3. Filter contours by size and shape
-        # 4. Detect if table is bordered
-        # 5. Calculate confidence scores
-        return []  # [(bbox, confidence, is_bordered), ...] 
+        try:
+            # Apply adaptive thresholding
+            thresh = cv2.adaptiveThreshold(
+                gray_image,
+                255,
+                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY_INV,
+                11,
+                2
+            )
+            
+            # Find contours
+            contours, _ = cv2.findContours(
+                thresh,
+                cv2.RETR_EXTERNAL,
+                cv2.CHAIN_APPROX_SIMPLE
+            )
+            
+            # Process contours
+            tables = []
+            img_area = gray_image.shape[0] * gray_image.shape[1]
+            
+            for contour in contours:
+                # Get bounding box
+                x, y, w, h = cv2.boundingRect(contour)
+                area = w * h
+                
+                # Filter by size
+                if area < img_area * min_table_size:
+                    continue
+                
+                # Calculate confidence based on area and aspect ratio
+                aspect_ratio = w / h if h > 0 else 0
+                area_score = min(area / img_area / 0.5, 1.0)  # Normalize area score
+                ratio_score = min(abs(aspect_ratio - 1.5) / 1.5, 1.0)  # Prefer tables with 1.5 aspect ratio
+                confidence = (area_score + ratio_score) / 2
+                
+                # Check if table is bordered
+                border_region = thresh[y:y+h, x:x+w]
+                border_pixels = cv2.countNonZero(border_region)
+                is_bordered = border_pixels > (w + h) * 2  # Simple heuristic
+                
+                tables.append(([x, y, x+w, y+h], confidence, is_bordered))
+            
+            # Sort by confidence
+            tables.sort(key=lambda x: x[1], reverse=True)
+            return tables
+            
+        except Exception as e:
+            raise RuntimeError(f"Table detection processing failed: {str(e)}") 
