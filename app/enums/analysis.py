@@ -1,29 +1,18 @@
 from enum import Enum
 
-class AnalysisTypeEnum(str, Enum):
+class AnalysisMode(str, Enum):
     """
-    Enum for the type of analysis.
+    Enum for the mode of an analysis.
     """
-    TABLE_ANALYSIS = "table_analysis"
-    TEXT_ANALYSIS = "text_analysis"
-    TEMPLATE_CONVERSION = "template_conversion"
+    AUTOMATIC = "automatic"
+    STEP_BY_STEP = "step_by_step"
 
 
-class AnalysisStepEnum(str, Enum):
+class AnalysisStatus(str, Enum):
     """
-    Enum for the steps of an analysis.
+    Enum for the status of an analysis.
     """
-    # Table Analysis Steps
-    TABLE_DETECTION = "table_detection"
-    TABLE_STRUCTURE_RECOGNITION = "table_structure_recognition"
-    TABLE_DATA_EXTRACTION = "table_data_extraction"
-    
-    # Text Analysis Steps
-    TEXT_DETECTION = "text_detection"
-    TEXT_RECOGNITION = "text_recognition"
-    TEXT_CLASSIFICATION = "text_classification"
-    
-    # Template Conversion Steps
-    TEMPLATE_DETECTION = "template_detection"
-    TEMPLATE_MATCHING = "template_matching"
-    TEMPLATE_EXTRACTION = "template_extraction"
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
