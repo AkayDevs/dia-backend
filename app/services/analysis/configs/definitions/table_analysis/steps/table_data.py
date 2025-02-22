@@ -1,5 +1,5 @@
 from typing import Dict, Any, Optional, List
-from app.services.analysis.configs.base.base_step import BaseStep
+from app.services.analysis.configs.base import BaseStep
 from app.schemas.analysis.configs.steps import StepDefinitionInfo
 from app.schemas.analysis.configs.algorithms import AlgorithmParameter
 

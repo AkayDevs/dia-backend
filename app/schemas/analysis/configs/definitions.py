@@ -62,4 +62,4 @@ class AnalysisDefinitionInfo(BaseModel):
     is_active: bool
 
     class Config:
-        from_attributes = True 
+        from_attributes = True

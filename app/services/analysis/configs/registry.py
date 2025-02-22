@@ -25,6 +25,7 @@ class AnalysisRegistry:
         
         cls._analysis_definitions[definition.code] = definition
         cls._analysis_steps[definition.code] = set()
+        logger.info(f"Registered analysis definition: {definition.code}")
     
     @classmethod
     def register_step(cls, step: StepDefinitionInfo, analysis_code: str) -> None:
@@ -39,6 +40,7 @@ class AnalysisRegistry:
         cls._steps[step_code] = step
         cls._analysis_steps[analysis_code].add(step_code)
         cls._step_algorithms[step_code] = set()
+        logger.info(f"Registered step: {step_code}")
     
     @classmethod
     def register_algorithm(cls, algorithm: AlgorithmDefinitionInfo, step_code: str) -> None:
@@ -52,6 +54,7 @@ class AnalysisRegistry:
         
         cls._algorithms[algo_code] = algorithm
         cls._step_algorithms[step_code].add(algo_code)
+        logger.info(f"Registered algorithm: {algo_code}")
     
     @classmethod
     def get_analysis_definition(cls, code: str) -> Optional[AnalysisDefinitionInfo]:
@@ -106,9 +109,10 @@ class AnalysisRegistry:
     
     @classmethod
     def clear(cls) -> None:
-        """Clear all registrations (useful for testing)"""
+        """Clear all registrations"""
         cls._analysis_definitions.clear()
         cls._steps.clear()
         cls._algorithms.clear()
         cls._analysis_steps.clear()
-        cls._step_algorithms.clear() 
+        cls._step_algorithms.clear()
+        logger.info("Analysis registry cleared") 

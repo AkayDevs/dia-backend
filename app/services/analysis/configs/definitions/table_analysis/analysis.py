@@ -55,7 +55,4 @@ class TableAnalysis(BaseDefinition):
     async def cleanup(self, document: Document) -> None:
         """Cleanup any temporary resources"""
         # Add cleanup logic here if needed
-        pass
-
-# Register the analysis definition
-AnalysisRegistry.register_analysis_definition(TableAnalysis().get_info()) 
+        pass 

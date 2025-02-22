@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, List
 from app.schemas.analysis.configs.definitions import AnalysisDefinitionInfo
-from app.schemas.document import DocumentInfo
+from app.schemas.document import Document as DocumentInfo
 from app.enums.document import DocumentType
 
 class BaseDefinition(ABC):

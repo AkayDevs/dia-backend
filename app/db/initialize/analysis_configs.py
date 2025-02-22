@@ -28,7 +28,10 @@ def discover_analysis_definitions() -> None:
         for _, name, _ in pkgutil.iter_modules(analysis_defs.__path__):
             try:
                 # Import the analysis module
-                importlib.import_module(f"app.analysis.definitions.{name}.analysis")
+                module = importlib.import_module(f"app.services.analysis.configs.definitions.{name}")
+                # Call register_components if available
+                if hasattr(module, 'register_components'):
+                    module.register_components()
                 logger.info(f"Successfully loaded analysis definition: {name}")
             except Exception as e:
                 logger.error(f"Error loading analysis definition {name}: {str(e)}")

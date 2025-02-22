@@ -1,7 +1,7 @@
 from typing import Dict, Any
 import cv2
 import numpy as np
-from app.services.analysis.configs.base.base_algorithm import BaseAlgorithm
+from app.services.analysis.configs.base import BaseAlgorithm
 from app.schemas.analysis.configs.algorithms import AlgorithmDefinitionInfo, AlgorithmParameter
 from app.enums.document import DocumentType
 from app.schemas.analysis.results.table_detection import TableDetectionResult
