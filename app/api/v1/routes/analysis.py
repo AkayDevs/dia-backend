@@ -5,72 +5,92 @@ import logging
 from datetime import datetime
 
 from app.db import deps
-from app.crud import crud_analysis, crud_document
-from app.schemas.analysis import (
-    AnalysisType,
-    AnalysisStep,
-    Algorithm,
-    Analysis,
-    AnalysisStepResult,
-    AnalysisRequest,
-    StepExecutionRequest,
-    AnalysisCreate
+from app.crud import crud_analysis_config, crud_document
+from app.schemas.analysis.configs.definitions import (
+    AnalysisDefinitionInfo,
+    AnalysisDefinitionWithSteps,
+    AnalysisDefinitionWithStepsAndAlgorithms
+)
+from app.schemas.analysis.configs.steps import StepDefinitionWithAlgorithms
+from app.schemas.analysis.configs.algorithms import AlgorithmDefinitionInfo
+from app.schemas.analysis.executions import (
+    AnalysisRunCreate,
+    AnalysisRunInfo,
+    AnalysisRunWithResults,
+    StepExecutionResultInfo,
+    StepExecutionResultUpdate
 )
 from app.db.models.user import User
 from app.services.analysis.executions.orchestrator import AnalysisOrchestrator
 from app.schemas.document import DocumentType
+from app.enums.analysis import AnalysisMode, AnalysisStatus
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-@router.get("/types", response_model=List[AnalysisType])
-async def list_analysis_types(
+@router.get("/definitions", response_model=List[AnalysisDefinitionInfo])
+async def list_analysis_definitions(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_verified_user),
-) -> List[AnalysisType]:
+) -> List[AnalysisDefinitionInfo]:
     """
-    List all available analysis types with their steps and algorithms.
+    List all available analysis definitions.
     """
-    return crud_analysis.analysis_type.get_multi(db)
+    return crud_analysis_config.analysis_definition.get_active_definitions(db)
 
-@router.get("/types/{analysis_type_id}", response_model=AnalysisType)
-async def get_analysis_type(
-    analysis_type_id: str,
+@router.get("/definitions/{definition_id}", response_model=AnalysisDefinitionWithStepsAndAlgorithms)
+async def get_analysis_definition(
+    definition_id: str,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_verified_user),
-) -> AnalysisType:
+) -> AnalysisDefinitionWithStepsAndAlgorithms:
     """
-    Get detailed information about a specific analysis type.
+    Get detailed information about a specific analysis definition.
     """
-    analysis_type = crud_analysis.analysis_type.get_with_steps(db, analysis_type_id)
-    if not analysis_type:
+    definition = crud_analysis_config.analysis_definition.get(db, id=definition_id)
+    if not definition:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Analysis type not found"
+            detail="Analysis definition not found"
         )
-    return analysis_type
+    return definition
 
-@router.get("/steps/{step_id}/algorithms", response_model=List[Algorithm])
+@router.get("/steps/{step_id}/algorithms", response_model=List[AlgorithmDefinitionInfo])
 async def list_step_algorithms(
     step_id: str,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_verified_user),
-) -> List[Algorithm]:
+) -> List[AlgorithmDefinitionInfo]:
     """
     List all available algorithms for a specific analysis step.
     """
-    return crud_analysis.algorithm.get_by_step(db, step_id)
+    return crud_analysis_config.algorithm_definition.get_by_step(db, step_id)
 
-@router.post("/documents/{document_id}/analyze", response_model=Analysis)
+@router.post("/documents/{document_id}/analyze", response_model=AnalysisRunInfo)
 async def start_analysis(
     document_id: str,
-    analysis_request: AnalysisRequest,
-    background_tasks: BackgroundTasks,
+    analysis_definition_id: str,
+    mode: AnalysisMode = AnalysisMode.AUTOMATIC,
+    algorithm_configs: Optional[Dict[str, Dict[str, Any]]] = None,
+    background_tasks: BackgroundTasks = None,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_verified_user),
-) -> Analysis:
+) -> AnalysisRunInfo:
     """
     Start a new analysis for a document.
+    
+    Args:
+        document_id: ID of the document to analyze
+        analysis_definition_id: ID of the analysis definition to use
+        mode: Analysis execution mode (automatic or step_by_step)
+        algorithm_configs: Optional configurations for specific steps
+            Format: {
+                "step_id": {
+                    "algorithm_code": "algorithm_code",
+                    "algorithm_version": "1.0.0",
+                    "parameters": {"param1": "value1"}
+                }
+            }
     """
     # Verify document exists and user has access
     document = crud_document.document.get(db, id=document_id)
@@ -85,59 +105,59 @@ async def start_analysis(
             detail="Not enough permissions"
         )
 
-    # Verify analysis type exists
-    analysis_type = crud_analysis.analysis_type.get(db, id=str(analysis_request.analysis_type_id))
-    if not analysis_type:
+    # Verify analysis definition exists and is active
+    definition = crud_analysis_config.analysis_definition.get(db, id=analysis_definition_id)
+    if not definition or not definition.is_active:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Analysis type not found"
+            detail="Analysis definition not found or inactive"
         )
 
     # Verify document type is supported
-    if document.type not in analysis_type.supported_document_types:
+    if document.type not in definition.supported_document_types:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Document type {document.type} is not supported by this analysis type"
+            detail=f"Document type {document.type} is not supported by this analysis"
         )
 
     try:
-        # Create analysis with steps
-        analysis_create = AnalysisCreate(
+        # Create analysis run
+        analysis_create = AnalysisRunCreate(
             document_id=document_id,
-            analysis_type_id=analysis_request.analysis_type_id,
-            mode=analysis_request.mode
+            analysis_definition_id=analysis_definition_id,
+            mode=mode
         )
         
-        analysis_obj = crud_analysis.analysis.create_with_steps(
+        analysis_run = crud_analysis_config.analysis_run.create_with_steps(
             db=db,
             obj_in=analysis_create,
-            algorithm_configs=analysis_request.algorithm_configs
+            algorithm_configs=algorithm_configs or {}
         )
 
         # Start analysis in background for automatic mode
-        if analysis_request.mode == "automatic":
+        if mode == AnalysisMode.AUTOMATIC and background_tasks:
             orchestrator = AnalysisOrchestrator()
             background_tasks.add_task(
                 orchestrator.run_analysis,
                 db,
-                analysis_obj.id
+                analysis_run.id
             )
 
-        return analysis_obj
+        return analysis_run
 
     except Exception as e:
         logger.error(f"Error starting analysis: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error starting analysis"
+            detail=str(e)
         )
 
-@router.get("/documents/{document_id}/analyses", response_model=List[Analysis])
+@router.get("/documents/{document_id}/analyses", response_model=List[AnalysisRunWithResults])
 async def list_document_analyses(
     document_id: str,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_verified_user),
-) -> List[Analysis]:
+) -> List[AnalysisRunWithResults]:
     """
     List all analyses for a specific document.
     """
@@ -154,61 +174,68 @@ async def list_document_analyses(
             detail="Not enough permissions"
         )
 
-    return crud_analysis.analysis.get_by_document(db, document_id)
+    return crud_analysis_config.analysis_run.get_by_document(db, document_id)
 
-@router.get("/analyses/{analysis_id}", response_model=Analysis)
+@router.get("/analyses/{analysis_id}", response_model=AnalysisRunWithResults)
 async def get_analysis(
     analysis_id: str,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_verified_user),
-) -> Analysis:
+) -> AnalysisRunWithResults:
     """
     Get detailed information about a specific analysis.
     """
-    analysis_obj = crud_analysis.analysis.get(db, id=analysis_id)
-    if not analysis_obj:
+    analysis_run = crud_analysis_config.analysis_run.get(db, id=analysis_id)
+    if not analysis_run:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Analysis not found"
         )
 
     # Verify user has access to the document
-    document = crud_document.document.get(db, id=analysis_obj.document_id)
+    document = crud_document.document.get(db, id=analysis_run.document_id)
     if str(document.user_id) != str(current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
         )
 
-    return analysis_obj
+    return analysis_run
 
-@router.post("/analyses/{analysis_id}/steps/{step_id}/execute", response_model=AnalysisStepResult)
+@router.post("/analyses/{analysis_id}/steps/{step_id}/execute", response_model=StepExecutionResultInfo)
 async def execute_step(
     analysis_id: str,
     step_id: str,
-    execution_request: StepExecutionRequest,
-    background_tasks: BackgroundTasks,
+    algorithm_id: str,
+    parameters: Optional[Dict[str, Any]] = None,
+    background_tasks: BackgroundTasks = None,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_verified_user),
-) -> AnalysisStepResult:
+) -> StepExecutionResultInfo:
     """
     Execute a specific step in step-by-step mode.
+    
+    Args:
+        analysis_id: ID of the analysis run
+        step_id: ID of the step to execute
+        algorithm_id: ID of the algorithm to use
+        parameters: Optional algorithm parameters
     """
     # Verify analysis exists and is in step-by-step mode
-    analysis_obj = crud_analysis.analysis.get(db, id=analysis_id)
-    if not analysis_obj:
+    analysis_run = crud_analysis_config.analysis_run.get(db, id=analysis_id)
+    if not analysis_run:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Analysis not found"
         )
-    if analysis_obj.mode != "step_by_step":
+    if analysis_run.mode != AnalysisMode.STEP_BY_STEP:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="This analysis is not in step-by-step mode"
         )
 
     # Verify user has access to the document
-    document = crud_document.document.get(db, id=analysis_obj.document_id)
+    document = crud_document.document.get(db, id=analysis_run.document_id)
     if str(document.user_id) != str(current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -217,7 +244,7 @@ async def execute_step(
 
     # Get step result
     step_result = next(
-        (r for r in analysis_obj.step_results if str(r.step_id) == step_id),
+        (r for r in analysis_run.step_results if str(r.step_definition_id) == step_id),
         None
     )
     if not step_result:
@@ -226,45 +253,66 @@ async def execute_step(
             detail="Step not found in this analysis"
         )
 
-    # Update step configuration
-    step_result.algorithm_id = execution_request.algorithm_id
-    step_result.parameters = execution_request.parameters
-    step_result.status = "pending"
-    db.add(step_result)
-    db.commit()
-    db.refresh(step_result)
+    # Verify algorithm exists and is active
+    algorithm = crud_analysis_config.algorithm_definition.get(db, id=algorithm_id)
+    if not algorithm or not algorithm.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Algorithm not found or inactive"
+        )
 
-    # Execute step in background
-    orchestrator = AnalysisOrchestrator()
-    background_tasks.add_task(
-        orchestrator.run_step,
-        db,
-        step_result.id
-    )
+    try:
+        # Update step configuration
+        step_result_update = StepExecutionResultUpdate(
+            algorithm_definition_id=algorithm_id,
+            parameters=parameters or {},
+            status=AnalysisStatus.PENDING
+        )
+        step_result = crud_analysis_config.step_execution_result.update(
+            db,
+            db_obj=step_result,
+            obj_in=step_result_update
+        )
 
-    return step_result
+        # Execute step in background
+        if background_tasks:
+            orchestrator = AnalysisOrchestrator()
+            background_tasks.add_task(
+                orchestrator.run_step,
+                db,
+                step_result.id
+            )
 
-@router.put("/analyses/{analysis_id}/steps/{step_id}/corrections", response_model=AnalysisStepResult)
+        return step_result
+
+    except Exception as e:
+        logger.error(f"Error executing step: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@router.put("/analyses/{analysis_id}/steps/{step_id}/corrections", response_model=StepExecutionResultInfo)
 async def update_step_corrections(
     analysis_id: str,
     step_id: str,
     corrections: Dict[str, Any],
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_verified_user),
-) -> AnalysisStepResult:
+) -> StepExecutionResultInfo:
     """
     Update user corrections for a step result.
     """
     # Verify analysis exists
-    analysis_obj = crud_analysis.analysis.get(db, id=analysis_id)
-    if not analysis_obj:
+    analysis_run = crud_analysis_config.analysis_run.get(db, id=analysis_id)
+    if not analysis_run:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Analysis not found"
         )
 
     # Verify user has access to the document
-    document = crud_document.document.get(db, id=analysis_obj.document_id)
+    document = crud_document.document.get(db, id=analysis_run.document_id)
     if str(document.user_id) != str(current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -273,7 +321,7 @@ async def update_step_corrections(
 
     # Get step result
     step_result = next(
-        (r for r in analysis_obj.step_results if str(r.step_id) == step_id),
+        (r for r in analysis_run.step_results if str(r.step_definition_id) == step_id),
         None
     )
     if not step_result:
@@ -283,16 +331,16 @@ async def update_step_corrections(
         )
 
     # Update corrections
-    return crud_analysis.analysis_step_result.update_user_corrections(
+    return crud_analysis_config.step_execution_result.update_user_corrections(
         db=db,
         db_obj=step_result,
         corrections=corrections
-    ) 
+    )
 
-@router.get("/user/analyses", response_model=List[Analysis])
+@router.get("/user/analyses", response_model=List[AnalysisRunWithResults])
 async def list_user_analyses(
-    status: Optional[str] = Query(None, description="Filter by analysis status (pending, in_progress, completed, failed)"),
-    analysis_type_id: Optional[str] = Query(None, description="Filter by analysis type ID"),
+    status: Optional[AnalysisStatus] = Query(None, description="Filter by analysis status"),
+    analysis_definition_id: Optional[str] = Query(None, description="Filter by analysis definition"),
     document_type: Optional[DocumentType] = Query(None, description="Filter by document type"),
     start_date: Optional[datetime] = Query(None, description="Filter by start date (inclusive)"),
     end_date: Optional[datetime] = Query(None, description="Filter by end date (inclusive)"),
@@ -300,27 +348,15 @@ async def list_user_analyses(
     limit: int = Query(100, ge=1, le=1000, description="Number of records to return"),
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_verified_user),
-) -> List[Analysis]:
+) -> List[AnalysisRunWithResults]:
     """
     List all analyses for the current user with filtering options.
-    
-    Parameters:
-    - status: Filter by analysis status
-    - analysis_type_id: Filter by analysis type
-    - document_type: Filter by document type
-    - start_date: Filter by start date (inclusive)
-    - end_date: Filter by end date (inclusive)
-    - skip: Number of records to skip (pagination)
-    - limit: Number of records to return (pagination)
-    
-    Returns:
-    - List of analyses matching the filter criteria
     """
     try:
         filters = {
             "user_id": str(current_user.id),
             "status": status,
-            "analysis_type_id": analysis_type_id,
+            "analysis_definition_id": analysis_definition_id,
             "document_type": document_type,
             "start_date": start_date,
             "end_date": end_date
@@ -329,18 +365,16 @@ async def list_user_analyses(
         # Remove None values from filters
         filters = {k: v for k, v in filters.items() if v is not None}
         
-        analyses = crud_analysis.analysis.get_multi_by_filters(
+        return crud_analysis_config.analysis_run.get_multi_by_filters(
             db=db,
             filters=filters,
             skip=skip,
             limit=limit
         )
         
-        return analyses
-        
     except Exception as e:
         logger.error(f"Error fetching analyses for user {current_user.id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error fetching analyses"
+            detail=str(e)
         ) 

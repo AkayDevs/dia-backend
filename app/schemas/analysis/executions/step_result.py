@@ -41,4 +41,4 @@ class StepExecutionResultInDB(StepExecutionResultBase):
 
 class StepExecutionResultInfo(StepExecutionResultInDB):
     """Schema for step execution result with basic information"""
-    pass 
+    pass

@@ -13,7 +13,7 @@ class StepDefinitionBase(BaseModel):
     base_parameters: List[AlgorithmParameter] = Field(
         default=[], description="Base parameter definitions for the step"
     )
-    result_schema: str = Field(
+    result_schema_path: str = Field(
         ..., description="Python path to result schema class"
     )
     implementation_path: str = Field(
@@ -31,7 +31,7 @@ class StepDefinitionUpdate(BaseModel):
     description: Optional[str] = None
     order: Optional[int] = Field(None, ge=0)
     base_parameters: Optional[List[AlgorithmParameter]] = None
-    result_schema: Optional[str] = None
+    result_schema_path: Optional[str] = None
     implementation_path: Optional[str] = None
     is_active: Optional[bool] = None
 

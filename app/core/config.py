@@ -63,8 +63,13 @@ class Settings(BaseSettings):
     
     # Admin Settings
     ADMIN_BASE_URL: str = "/admin"
-    ADMIN_PAGE_SIZE: int = 25
-    ADMIN_PAGE_SIZE_OPTIONS: List[int] = [25, 50, 100]
+    ADMIN_PAGE_SIZE: int = 50
+    ADMIN_PAGE_SIZE_OPTIONS: List[int] = [25, 50, 100, 250]
+    ADMIN_EXPORT_MAX_ROWS: int = 1000
+    ADMIN_SESSION_LIFETIME: int = 3600  # 1 hour in seconds
+    ADMIN_LOGIN_ATTEMPTS: int = 3  # Maximum failed login attempts before temporary lockout
+    ADMIN_LOCKOUT_TIME: int = 300  # 5 minutes lockout after max failed attempts
+    ADMIN_AUDIT_LOG_RETENTION: int = 90  # Days to keep audit logs
     
     # Admin User
     FIRST_SUPERUSER: EmailStr = "admin@example.com"
@@ -124,6 +129,10 @@ class Settings(BaseSettings):
 
     # Archive settings
     ARCHIVE_RETENTION_DAYS: int = 30  # Number of days to keep archived files before cleanup
+
+    # Admin Interface Settings
+    ADMIN_TITLE: str = "DIA Admin"
+    ADMIN_LOGO_URL: str = "/static/logo.png"
 
     class Config:
         case_sensitive = True

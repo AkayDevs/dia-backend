@@ -14,9 +14,10 @@ from app.schemas.analysis.executions import (
     AnalysisRunUpdate
 )
 from app.schemas.analysis.configs.algorithms import AlgorithmDefinitionInfo
-from app.schemas.document import DocumentInfo
+from app.schemas.document import Document
 from app.core.config import settings
 from app.enums.analysis import AnalysisStatus
+from app.services.analysis.results.schema_loader import ResultSchemaLoader
 
 logger = logging.getLogger(__name__)
 
@@ -63,11 +64,17 @@ class AnalysisOrchestrator:
         analysis_run: Optional[AnalysisRunInfo] = None
         
         try:
-            # Get step result
+            # Get step result and related info
             step_result = crud_analysis_config.step_execution_result.get(db, id=step_result_id)
             if not step_result:
                 logger.error(f"Step result not found: {step_result_id}")
                 return
+            
+            step_definition = crud_analysis_config.step_definition.get(
+                db, id=step_result.step_definition_id
+            )
+            if not step_definition:
+                raise Exception(f"Step definition not found: {step_result.step_definition_id}")
             
             # Update status to in_progress
             step_result_update = StepExecutionResultUpdate(
@@ -82,7 +89,7 @@ class AnalysisOrchestrator:
             
             # Get document path
             analysis_run = crud_analysis_config.analysis_run.get(db, id=step_result.analysis_run_id)
-            document: DocumentInfo = crud_document.document.get(db, id=analysis_run.document_id)
+            document: Document = crud_document.document.get(db, id=analysis_run.document_id)
             document_path = document.url.replace("/uploads/", "")
             
             # Get previous step results if they exist
@@ -122,17 +129,26 @@ class AnalysisOrchestrator:
             # Validate parameters against algorithm definition
             self._validate_parameters(step_result.parameters, algorithm.parameters)
             
-            # Execute implementation
+            # Execute implementation and validate result
             result = await implementation.execute(
                 document_path=document_path,
                 parameters=step_result.parameters,
                 previous_results=previous_results
             )
             
+            # Validate result against schema
+            try:
+                validated_result = ResultSchemaLoader.validate_result(
+                    step_definition.result_schema_path,
+                    result
+                )
+            except Exception as e:
+                raise ValueError(f"Result validation failed: {str(e)}")
+            
             # Update step result
             step_result_update = StepExecutionResultUpdate(
                 status=AnalysisStatus.COMPLETED,
-                result=result,
+                result=validated_result,
                 completed_at=datetime.utcnow()
             )
             crud_analysis_config.step_execution_result.update(

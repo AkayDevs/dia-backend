@@ -9,7 +9,7 @@ from app.enums.document import DocumentType
 
 if TYPE_CHECKING:
     from app.db.models.user import User
-    from app.db.models.analysis import Analysis
+    from app.db.models.analysis_execution import AnalysisRun
 
 # Association table for document-tag many-to-many relationship
 document_tags = Table(
@@ -61,7 +61,7 @@ class Document(Base):
 
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="documents")
-    analyses: Mapped[List["Analysis"]] = relationship("Analysis", back_populates="document", cascade="all, delete-orphan")
+    analysis_runs: Mapped[List["AnalysisRun"]] = relationship("AnalysisRun", back_populates="document", cascade="all, delete-orphan")
     tags: Mapped[List["Tag"]] = relationship("Tag", secondary=document_tags, back_populates="documents")
 
     __table_args__ = (
