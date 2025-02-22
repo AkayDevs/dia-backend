@@ -19,7 +19,7 @@ import logging
 import uuid
 from starlette.middleware.base import BaseHTTPMiddleware
 from typing import Callable
-from app.analysis.core.initialization import init_analysis_db
+from app.db.initialize.analysis_configs import init_analysis_db
 
 # Initialize logging
 setup_logging(env_mode=os.getenv("ENV", "development"))

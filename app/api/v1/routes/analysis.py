@@ -17,7 +17,7 @@ from app.schemas.analysis import (
     AnalysisCreate
 )
 from app.db.models.user import User
-from app.core.analysis import AnalysisOrchestrator
+from app.services.analysis.executions.orchestrator import AnalysisOrchestrator
 from app.schemas.document import DocumentType
 
 router = APIRouter()

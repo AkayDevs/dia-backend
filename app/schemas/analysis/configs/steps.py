@@ -1,59 +1,58 @@
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field, conint
+from pydantic import BaseModel, Field
 from datetime import datetime
+from .algorithms import AlgorithmDefinitionInfo, AlgorithmParameter
 
-from app.analysis.schemas.algorithms import AlgorithmInfo
-
-class AnalysisStepBase(BaseModel):
-    """Base schema for analysis step data"""
-    code: str = Field(..., description="Unique identifier code from registry")
+class StepDefinitionBase(BaseModel):
+    """Base schema for step definition data"""
+    code: str = Field(..., description="Unique identifier code")
     name: str = Field(..., description="Human-readable name")
     version: str = Field(..., description="Version string (e.g., '1.0.0')")
     description: Optional[str] = Field(None, description="Detailed description")
-    order: int = Field(..., description="Execution order in analysis type", ge=0)
-    base_parameters: List[Dict[str, Any]] = Field(
+    order: int = Field(..., description="Execution order in analysis", ge=0)
+    base_parameters: List[AlgorithmParameter] = Field(
         default=[], description="Base parameter definitions for the step"
     )
-    result_schema: Dict[str, Any] = Field(
-        default_factory=dict, description="JSON schema for step results"
+    result_schema: str = Field(
+        ..., description="Python path to result schema class"
     )
     implementation_path: str = Field(
         ..., description="Python path to implementation class"
     )
     is_active: bool = Field(True, description="Whether this step is active")
 
-class AnalysisStepCreate(AnalysisStepBase):
-    """Schema for creating a new analysis step"""
-    analysis_type_id: str = Field(..., description="ID of the parent analysis type")
+class StepDefinitionCreate(StepDefinitionBase):
+    """Schema for creating a new step definition"""
+    analysis_definition_id: str = Field(..., description="ID of the parent analysis definition")
 
-class AnalysisStepUpdate(BaseModel):
-    """Schema for updating an analysis step"""
+class StepDefinitionUpdate(BaseModel):
+    """Schema for updating a step definition"""
     name: Optional[str] = None
     description: Optional[str] = None
     order: Optional[int] = Field(None, ge=0)
-    base_parameters: Optional[List[Dict[str, Any]]] = None
-    result_schema: Optional[Dict[str, Any]] = None
+    base_parameters: Optional[List[AlgorithmParameter]] = None
+    result_schema: Optional[str] = None
     implementation_path: Optional[str] = None
     is_active: Optional[bool] = None
 
-class AnalysisStepInDB(AnalysisStepBase):
-    """Schema for analysis step as stored in database"""
+class StepDefinitionInDB(StepDefinitionBase):
+    """Schema for step definition as stored in database"""
     id: str
-    analysis_type_id: str
+    analysis_definition_id: str
     created_at: datetime
     updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
 
-class AnalysisStepWithAlgorithms(AnalysisStepInDB):
-    """Schema for analysis step with its algorithms"""
-    algorithms: List[AlgorithmInfo] = Field(
+class StepDefinitionWithAlgorithms(StepDefinitionInDB):
+    """Schema for step definition with its algorithms"""
+    algorithms: List[AlgorithmDefinitionInfo] = Field(
         default_factory=list, description="Available algorithms for this step"
     )
 
-class AnalysisStepInfo(BaseModel):
-    """Schema for basic analysis step information"""
+class StepDefinitionInfo(BaseModel):
+    """Schema for basic step definition information"""
     id: str
     code: str
     name: str
@@ -65,7 +64,7 @@ class AnalysisStepInfo(BaseModel):
     class Config:
         from_attributes = True
 
-class AnalysisStepParameter(BaseModel):
+class StepParameter(BaseModel):
     """Schema for step parameter definition"""
     name: str = Field(..., description="Parameter name")
     type: str = Field(..., description="Parameter type (e.g., 'string', 'number')")

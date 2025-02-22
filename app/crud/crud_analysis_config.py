@@ -9,17 +9,17 @@ from app.db.models.analysis_config import (
     StepDefinition,
     AlgorithmDefinition
 )
-from app.analysis.schemas.types import (
-    AnalysisTypeCreate as AnalysisDefinitionCreate,
-    AnalysisTypeUpdate as AnalysisDefinitionUpdate
+from app.schemas.analysis.configs.definitions import (
+    AnalysisDefinitionCreate,
+    AnalysisDefinitionUpdate
 )
-from app.analysis.schemas.steps import (
-    AnalysisStepCreate as StepDefinitionCreate,
-    AnalysisStepUpdate as StepDefinitionUpdate
+from app.schemas.analysis.configs.steps import (
+    StepDefinitionCreate,
+    StepDefinitionUpdate
 )
-from app.analysis.schemas.algorithms import (
-    AlgorithmCreate as AlgorithmDefinitionCreate,
-    AlgorithmUpdate as AlgorithmDefinitionUpdate
+from app.schemas.analysis.configs.algorithms import (
+    AlgorithmDefinitionCreate,
+    AlgorithmDefinitionUpdate
 )
 
 logger = logging.getLogger(__name__)

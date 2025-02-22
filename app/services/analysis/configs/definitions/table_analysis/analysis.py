@@ -1,7 +1,7 @@
 from typing import Dict, Any
-from app.analysis.base.base_analysis import BaseAnalysis
-from app.analysis.registry.components import AnalysisTypeInfo, AnalysisIdentifier
-from app.analysis.registry.registry import AnalysisRegistry
+from app.services.analysis.configs.base.base_defination import BaseAnalysis
+from app.services.analysis.registry.components import AnalysisTypeInfo, AnalysisIdentifier
+from app.services.analysis.registry.registry import AnalysisRegistry
 from app.schemas.document import Document
 from app.enums.document import DocumentType
 from .steps.table_detection import TableDetectionStep
