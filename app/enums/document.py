@@ -6,6 +6,7 @@ class DocumentType(str, Enum):
     DOCX = "docx"
     XLSX = "xlsx"
     IMAGE = "image"
+    UNKNOWN = "unknown"
 
 
 

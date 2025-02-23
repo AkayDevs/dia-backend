@@ -19,6 +19,7 @@ import magic
 import asyncio
 import logging
 from pathlib import Path
+import shutil
 
 from app.core.config import settings
 from app.db import deps
@@ -35,7 +36,7 @@ from app.schemas.document import (
 from app.db.models.document import Tag
 from app.db.models.user import User
 from app.enums.document import DocumentType, MIME_TYPES
-from app.utils.document import extract_document_pages
+from app.services.documents.document import extract_document_pages
 
 
 router = APIRouter()
@@ -46,32 +47,43 @@ logger = logging.getLogger(__name__)
 async def validate_and_save_file(
     file: UploadFile,
     user_id: str,
+    document_id: str,
     background_tasks: BackgroundTasks
 ) -> DocumentCreate:
     """
     Validate and save an uploaded file.
     """
     try:
+        # Read file content
         content = await file.read()
         size = len(content)
         await file.seek(0)
 
+        # Validate file size
         if size > settings.MAX_UPLOAD_SIZE:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"File too large. Maximum size is {settings.MAX_UPLOAD_SIZE / 1024 / 1024}MB"
             )
 
-        user_upload_dir = Path(settings.UPLOAD_DIR) / str(user_id)
-        user_upload_dir.mkdir(parents=True, exist_ok=True)
+        # Create directories using provided document_id
+        doc_dir = Path(settings.UPLOAD_DIR) / str(user_id) / str(document_id)
+        original_dir = doc_dir / "original"
+        pages_dir = doc_dir / "pages"
+        
+        original_dir.mkdir(parents=True, exist_ok=True)
+        pages_dir.mkdir(parents=True, exist_ok=True)
 
+        # Save file with timestamp and original name
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{timestamp}_{uuid.uuid4().hex[:8]}_{file.filename}"
-        file_path = user_upload_dir / filename
+        filename = f"{timestamp}_{file.filename}"
+        file_path = original_dir / filename
 
+        # Write file
         async with aiofiles.open(file_path, 'wb') as f:
             await f.write(content)
 
+        # Validate file type
         mime = magic.from_file(str(file_path), mime=True)
         if mime not in MIME_TYPES:
             raise HTTPException(
@@ -80,20 +92,21 @@ async def validate_and_save_file(
             )
 
         doc_type = MIME_TYPES[mime]
-        file_url = f"/{settings.UPLOAD_DIR}/{user_id}/{filename}"
 
+        # Create document
         document = DocumentCreate(
             name=file.filename,
             type=doc_type,
             size=size,
-            url=file_url,
+            url=f"/uploads/{user_id}/{document_id}/original/{filename}",
         )
 
         return document
 
     except Exception as e:
-        if 'file_path' in locals():
-            background_tasks.add_task(lambda: Path(file_path).unlink(missing_ok=True))
+        # Cleanup on error
+        if 'doc_dir' in locals() and doc_dir.exists():
+            background_tasks.add_task(lambda: shutil.rmtree(doc_dir, ignore_errors=True))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
@@ -277,24 +290,44 @@ async def upload_document(
                     detail="Invalid tag_ids format. Expected comma-separated integers"
                 )
 
-        doc_create = await validate_and_save_file(
-            file, str(current_user.id), background_tasks
-        )
-        
-        doc_create.tag_ids = parsed_tag_ids
-        
-        document = crud_document.create_with_user(
+        # First create document in DB to get the ID
+        initial_doc = crud_document.create_with_user(
             db=db,
-            obj_in=doc_create,
+            obj_in=DocumentCreate(
+                name=file.filename,
+                type=DocumentType.UNKNOWN,
+                size=999,  # Use temp file size
+                url="pending"  # Temporary but valid URL
+            ),
             user_id=str(current_user.id)
         )
         
-        logger.info(f"Successfully created document: {file.filename}", extra={
-            "user_id": str(current_user.id),
-            "document_id": str(document.id),
-            "tag_ids": parsed_tag_ids
-        })
-        return document
+        try:
+            # Now use the DB-generated ID to save the file
+            doc_create = await validate_and_save_file(
+                file, str(current_user.id), str(initial_doc.id), background_tasks
+            )
+            
+            # Update the document with actual file info
+            doc_create.tag_ids = parsed_tag_ids
+            document = crud_document.update(
+                db=db,
+                db_obj=initial_doc,
+                obj_in=doc_create
+            )
+            
+            logger.info(f"Successfully created document: {file.filename}", extra={
+                "user_id": str(current_user.id),
+                "document_id": str(document.id),
+                "tag_ids": parsed_tag_ids
+            })
+            return document
+            
+        except Exception as e:
+            # If file processing fails, delete the initial document
+            crud_document.remove(db=db, id=initial_doc.id)
+            raise e
+            
     except HTTPException:
         raise
     except Exception as e:
@@ -327,17 +360,37 @@ async def upload_documents(
 
     for file in files:
         try:
-            doc_create = await validate_and_save_file(
-                file, str(current_user.id), background_tasks
-            )
-            
-            document = crud_document.create_with_user(
+            # First create document in DB to get the ID
+            initial_doc = crud_document.create_with_user(
                 db=db,
-                obj_in=doc_create,
+                obj_in=DocumentCreate(
+                    name=file.filename,
+                    type=DocumentType.UNKNOWN,
+                    size=999,  # Use temp file size
+                    url="pending"  # Temporary but valid URL
+                ),
                 user_id=str(current_user.id)
             )
-            documents.append(document)
             
+            try:
+                # Now use the DB-generated ID to save the file
+                doc_create = await validate_and_save_file(
+                    file, str(current_user.id), str(initial_doc.id), background_tasks
+                )
+                
+                # Update the document with actual file info
+                document = crud_document.update(
+                    db=db,
+                    db_obj=initial_doc,
+                    obj_in=doc_create
+                )
+                documents.append(document)
+                
+            except Exception as e:
+                # If file processing fails, delete the initial document
+                crud_document.remove(db=db, id=initial_doc.id)
+                raise e
+                
         except HTTPException as e:
             errors.append({"filename": file.filename, "error": str(e.detail)})
         except Exception as e:
@@ -515,7 +568,7 @@ async def update_document(
             try:
                 # Validate and save the new file
                 doc_create = await validate_and_save_file(
-                    file, str(current_user.id), background_tasks
+                    file, str(current_user.id), str(document.id), background_tasks
                 )
                 
                 # Archive the old document
@@ -696,7 +749,8 @@ async def get_document_pages(
         pages = await extract_document_pages(
             document_path=document.url,
             document_type=document.type,
-            user_id=str(current_user.id)
+            user_id=str(current_user.id),
+            document_id=document_id
         )
         
         logger.info(f"Successfully extracted {pages.total_pages} pages from document: {document_id}", extra={
