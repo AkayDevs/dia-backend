@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from sqladmin import Admin
 import logging
+import traceback
+from starlette.middleware.sessions import SessionMiddleware
 
 from app.core.config import settings
 from app.admin.auth import AdminAuth
@@ -29,6 +31,16 @@ def setup_admin(app: FastAPI, engine) -> None:
     - Search and filter capabilities
     """
     try:
+        # Configure session middleware first
+        app.add_middleware(
+            SessionMiddleware,
+            secret_key=settings.SECRET_KEY,
+            session_cookie=settings.SESSION_COOKIE_NAME,
+            max_age=settings.SESSION_COOKIE_EXPIRE,
+            same_site=settings.SESSION_COOKIE_SAMESITE,
+            https_only=settings.SESSION_COOKIE_SECURE
+        )
+        
         # Initialize authentication backend
         authentication_backend = AdminAuth()
         
@@ -36,27 +48,20 @@ def setup_admin(app: FastAPI, engine) -> None:
         admin = Admin(
             app,
             engine,
-            base_url="/admin",
-            title=settings.ADMIN_TITLE,
             authentication_backend=authentication_backend,
+            base_url=settings.ADMIN_BASE_URL,
+            title=settings.ADMIN_TITLE,
             logo_url=settings.ADMIN_LOGO_URL,
+            templates_dir="app/admin/templates",  # Custom templates directory
         )
         
-        # Register views in logical order
-        
-        # User management
+        # Register views
         admin.add_view(UserAdmin)
-        
-        # Document management
         admin.add_view(DocumentAdmin)
         admin.add_view(TagAdmin)
-        
-        # Analysis configuration
         admin.add_view(AnalysisDefinitionAdmin)
         admin.add_view(StepDefinitionAdmin)
         admin.add_view(AlgorithmDefinitionAdmin)
-        
-        # Analysis execution
         admin.add_view(AnalysisRunAdmin)
         admin.add_view(StepExecutionResultAdmin)
         
@@ -64,4 +69,5 @@ def setup_admin(app: FastAPI, engine) -> None:
         
     except Exception as e:
         logger.error(f"Error setting up admin interface: {str(e)}")
+        logger.error(traceback.format_exc())
         raise 

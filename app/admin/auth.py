@@ -2,9 +2,11 @@ from typing import Optional
 from fastapi import Request, status
 from starlette.responses import RedirectResponse
 from sqladmin.authentication import AuthenticationBackend
-from datetime import datetime
+from datetime import datetime, timedelta
 import jwt as PyJWT
 import logging
+from sqlalchemy.orm import Session
+import traceback
 
 from app.db.session import get_db
 from app.db.models.user import User, UserRole
@@ -22,199 +24,165 @@ class AdminAuth(AuthenticationBackend):
         super().__init__(secret_key=settings.SECRET_KEY)
         
     async def login(self, request: Request) -> bool:
-        """
-        Handle admin login with both token and credentials support.
-        
-        Features:
-        - Support for both token and username/password authentication
-        - Token blacklist checking
-        - Role-based access control
-        - Account verification check
-        - Secure session management
-        - Comprehensive logging
-        """
+        """Handle admin login with credentials."""
+        db = None
         try:
+            # Get form data
             form = await request.form()
-            auth_header = request.headers.get("Authorization")
+            username = form.get("username")
+            password = form.get("password")
             
-            # Try to get token from form or header
-            token = None
-            if auth_header and auth_header.startswith("Bearer "):
-                token = auth_header.split(" ")[1]
-            elif "token" in form:
-                token = form["token"]
-                
-            # If no token, try username/password
-            if not token and "username" in form and "password" in form:
-                db = next(get_db())
-                user = crud_user.get_by_email(db, email=form["username"])
-                
-                if user and verify_password(form["password"], user.hashed_password):
-                    if not self._validate_admin_access(user):
-                        logger.warning(f"Invalid admin login attempt for user: {user.email}")
-                        return False
-                        
-                    self._set_session(request, user)
-                    logger.info(f"Admin login successful: {user.email}")
-                    return True
-                    
-                logger.warning(f"Failed admin login attempt for user: {form['username']}")
-                return False
-                
-            if not token:
-                return False
-                
-            # Verify token
-            try:
-                payload = PyJWT.decode(
-                    token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
-                )
-            except PyJWT.InvalidTokenError:
-                logger.warning("Invalid token used for admin access")
+            logger.debug(f"Admin login attempt for user: {username}")
+            
+            if not username or not password:
+                logger.warning("Missing credentials in admin login attempt")
                 return False
             
+            # Get database session
             db = next(get_db())
             
-            # Check if token is blacklisted
-            if crud_token.is_blacklisted(db, token):
-                logger.warning("Attempted use of blacklisted token for admin access")
+            # Get user and verify credentials
+            user = crud_user.get_by_email(db, email=username)
+            if not user:
+                logger.warning(f"User not found: {username}")
                 return False
                 
-            user = crud_user.get(db, id=payload.get("sub"))
-            if not self._validate_admin_access(user):
-                logger.warning(f"Invalid admin access attempt with token for user ID: {payload.get('sub')}")
+            if not verify_password(password, user.hashed_password):
+                logger.warning(f"Invalid password for user: {username}")
                 return False
-                
-            self._set_session(request, user)
-            logger.info(f"Admin token login successful: {user.email}")
-            return True
             
+            if not self._validate_admin_access(user):
+                logger.warning(f"Non-admin user attempted login: {username}")
+                return False
+            
+            # Create session data
+            try:
+                request.session.clear()  # Clear any existing session
+                request.session["admin_authenticated"] = True
+                request.session["admin_id"] = str(user.id)
+                request.session["admin_email"] = user.email
+                request.session["admin_role"] = user.role.value
+                logger.info(f"Admin login successful: {user.email}")
+                return True
+            except Exception as session_error:
+                logger.error(f"Session error during login: {str(session_error)}")
+                logger.error(traceback.format_exc())
+                return False
+                
         except Exception as e:
             logger.error(f"Admin login error: {str(e)}")
+            logger.error(traceback.format_exc())
             return False
+        finally:
+            if db:
+                db.close()
+                logger.debug("Database session closed")
 
     async def logout(self, request: Request) -> bool:
-        """
-        Handle admin logout with enhanced security.
-        
-        Features:
-        - Token blacklisting
-        - Session cleanup
-        - Secure logout handling
-        """
+        """Handle admin logout."""
         try:
-            # Blacklist current token if present
-            auth_header = request.headers.get("Authorization")
-            if auth_header and auth_header.startswith("Bearer "):
-                token = auth_header.split(" ")[1]
-                db = next(get_db())
-                
-                try:
-                    # Get token expiry from payload
-                    payload = PyJWT.decode(
-                        token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
-                    )
-                    expires_at = datetime.fromtimestamp(payload.get("exp"))
-                    
-                    # Blacklist the token
-                    crud_token.blacklist_token(db, token, expires_at)
-                except PyJWT.InvalidTokenError:
-                    logger.warning("Invalid token encountered during logout")
-                
+            # Log session data before clearing
+            logger.debug(f"Logging out admin session: {request.session.get('admin_email')}")
+            
             # Clear session
             request.session.clear()
             logger.info("Admin logout successful")
             return True
-            
         except Exception as e:
             logger.error(f"Admin logout error: {str(e)}")
+            logger.error(traceback.format_exc())
             return False
 
     async def authenticate(self, request: Request) -> Optional[bool]:
-        """
-        Authenticate admin requests with enhanced security.
-        
-        Features:
-        - Session validation
-        - Token validation
-        - Role-based access control
-        - Account status verification
-        """
+        """Authenticate admin requests."""
+        db = None
         try:
-            if request.session.get("admin_authenticated"):
-                # Verify session data
-                admin_id = request.session.get("admin_id")
-                if not admin_id:
-                    return self._redirect_to_login(request)
-                
+            # Check session authentication
+            if not request.session.get("admin_authenticated"):
+                logger.debug("No admin authentication in session")
+                return self._redirect_to_login(request)
+            
+            # Get admin ID from session
+            admin_id = request.session.get("admin_id")
+            if not admin_id:
+                logger.debug("No admin ID in session")
+                return self._redirect_to_login(request)
+            
+            # Verify user still has admin access
+            try:
                 db = next(get_db())
                 user = crud_user.get(db, id=admin_id)
-                if not self._validate_admin_access(user):
+                
+                if not user:
+                    logger.warning(f"Admin user not found: {admin_id}")
+                    request.session.clear()
                     return self._redirect_to_login(request)
-                    
+                
+                if not self._validate_admin_access(user):
+                    logger.warning(f"Invalid admin session detected: {admin_id}")
+                    request.session.clear()
+                    return self._redirect_to_login(request)
+                
                 return True
                 
-            auth_header = request.headers.get("Authorization")
-            if not auth_header or not auth_header.startswith("Bearer "):
+            except Exception as db_error:
+                logger.error(f"Database error during authentication: {str(db_error)}")
+                logger.error(traceback.format_exc())
                 return self._redirect_to_login(request)
                 
-            token = auth_header.split(" ")[1]
-            db = next(get_db())
-            
-            # Check if token is blacklisted
-            if crud_token.is_blacklisted(db, token):
-                logger.warning("Attempted use of blacklisted token for admin authentication")
-                return self._redirect_to_login(request)
-                
-            try:
-                payload = PyJWT.decode(
-                    token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
-                )
-            except PyJWT.InvalidTokenError:
-                logger.warning("Invalid token used for admin authentication")
-                return self._redirect_to_login(request)
-                
-            user = crud_user.get(db, id=payload.get("sub"))
-            if not self._validate_admin_access(user):
-                logger.warning(f"Invalid admin authentication attempt for user ID: {payload.get('sub')}")
-                return self._redirect_to_login(request)
-                
-            self._set_session(request, user)
-            return True
-            
         except Exception as e:
             logger.error(f"Admin authentication error: {str(e)}")
+            logger.error(traceback.format_exc())
             return self._redirect_to_login(request)
+        finally:
+            if db:
+                db.close()
+                logger.debug("Database session closed")
 
     def _validate_admin_access(self, user: Optional[User]) -> bool:
-        """
-        Validate if user has admin access.
-        
-        Checks:
-        - User exists
-        - User is active
-        - User is verified
-        - User has admin role
-        """
-        return bool(
-            user and 
-            user.is_active and 
-            user.is_verified and 
-            user.role == UserRole.ADMIN
-        )
+        """Validate if user has admin access."""
+        try:
+            is_valid = bool(
+                user and 
+                user.is_active and 
+                user.is_verified and 
+                user.role == UserRole.ADMIN
+            )
+            if not is_valid:
+                logger.debug(f"Admin validation failed for user: {user.email if user else 'None'}")
+            return is_valid
+        except Exception as e:
+            logger.error(f"Error validating admin access: {str(e)}")
+            return False
 
-    def _set_session(self, request: Request, user: User) -> None:
-        """Set secure session data."""
-        request.session.update({
-            "admin_authenticated": True,
-            "admin_id": str(user.id),
-            "admin_email": user.email,
-            "admin_role": user.role.value
-        })
+    def _create_admin_token(self, user: User) -> str:
+        """Create a token for admin session."""
+        expires_delta = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = datetime.utcnow() + expires_delta
+        
+        to_encode = {
+            "sub": str(user.id),
+            "exp": expire,
+            "type": "admin_access"
+        }
+        
+        return PyJWT.encode(
+            to_encode,
+            settings.SECRET_KEY,
+            algorithm=settings.ALGORITHM
+        )
 
     def _redirect_to_login(self, request: Request) -> RedirectResponse:
         """Return redirect response to login page."""
-        return RedirectResponse(
-            request.url_for("admin:login"),
-            status_code=status.HTTP_302_FOUND
-        ) 
+        try:
+            return RedirectResponse(
+                request.url_for("admin:login"),
+                status_code=status.HTTP_302_FOUND
+            )
+        except Exception as e:
+            logger.error(f"Error creating redirect response: {str(e)}")
+            # Fallback to direct URL if url_for fails
+            return RedirectResponse(
+                "/admin/login",
+                status_code=status.HTTP_302_FOUND
+            ) 

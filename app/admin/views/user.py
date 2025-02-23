@@ -2,6 +2,9 @@ from typing import Any
 from app.admin.base import BaseModelView
 from app.db.models.user import User, UserRole
 from app.core.security import get_password_hash
+import logging
+
+logger = logging.getLogger(__name__)
 
 class UserAdmin(BaseModelView, model=User):
     """Enhanced admin interface for User model."""
@@ -22,6 +25,17 @@ class UserAdmin(BaseModelView, model=User):
         User.updated_at
     ]
     
+    column_labels = {
+        User.id: "ID",
+        User.email: "Email",
+        User.name: "Full Name",
+        User.role: "Role",
+        User.is_active: "Active",
+        User.is_verified: "Verified",
+        User.created_at: "Created",
+        User.updated_at: "Updated"
+    }
+    
     column_searchable_list = [
         User.email,
         User.name
@@ -39,7 +53,9 @@ class UserAdmin(BaseModelView, model=User):
     column_formatters = {
         User.is_active: lambda m, a: "✓" if m.is_active else "✗",
         User.is_verified: lambda m, a: "✓" if m.is_verified else "✗",
-        User.role: lambda m, a: f"<span class='badge badge-{'primary' if m.role == UserRole.ADMIN else 'secondary'}'>{m.role.value}</span>"
+        User.role: lambda m, a: f"<span class='badge badge-{'primary' if m.role == UserRole.ADMIN else 'secondary'}'>{m.role.value}</span>",
+        User.created_at: lambda m, a: m.created_at.strftime("%Y-%m-%d %H:%M"),
+        User.updated_at: lambda m, a: m.updated_at.strftime("%Y-%m-%d %H:%M")
     }
     
     # Form configuration
@@ -52,9 +68,26 @@ class UserAdmin(BaseModelView, model=User):
         "password"  # For password changes
     ]
     
-    form_excluded_columns = [
-        User.hashed_password,
-        User.documents
+    form_widget_args = {
+        "email": {
+            "placeholder": "user@example.com"
+        },
+        "name": {
+            "placeholder": "Full Name"
+        },
+        "password": {
+            "placeholder": "Leave empty to keep current password"
+        }
+    }
+    
+    # Make certain fields read-only in edit mode
+    form_edit_rules = [
+        "email",  # Email can't be changed once set
+        "name",
+        "role",
+        "is_active",
+        "is_verified",
+        "password"
     ]
     
     # Column descriptions for better UX
@@ -72,8 +105,13 @@ class UserAdmin(BaseModelView, model=User):
     # Security settings
     can_create = True  # Allow creating new users
     can_delete = False  # Prevent user deletion for audit purposes
-    can_edit = True    # Allow editing user details
+    can_edit = True  # Allow editing user details
     can_export = True  # Allow exporting user data
+    can_view_details = True  # Enable detailed view
+    
+    # List configuration
+    page_size = 25  # Show 25 users per page
+    can_set_page_size = True  # Allow admin to change items per page
     
     def on_model_change(self, form: Any, model: User, is_created: bool) -> None:
         """Handle user model changes with password hashing."""
@@ -101,5 +139,4 @@ class UserAdmin(BaseModelView, model=User):
     
     def log_action(self, message: str) -> None:
         """Log admin actions for audit trail."""
-        logger = self.logger
         logger.info(f"[UserAdmin] {message}") 
