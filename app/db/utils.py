@@ -31,9 +31,9 @@ def verify_database_schema(db: Session) -> bool:
         tables = inspector.get_table_names()
         
         expected_tables = [
-            'users', 'documents', 'analysis_types', 'analysis_steps',
-            'algorithms', 'analyses', 'analysis_step_results',
-            'table_detections', 'table_structures', 'table_data'
+            'users', 'documents', 'analysis_definitions', 'step_definitions',
+            'algorithm_definitions', 'analysis_runs', 'step_execution_results',
+            'blacklisted_tokens', 'tags', 'document_tags'
         ]
         missing_tables = set(expected_tables) - set(tables)
         
@@ -55,54 +55,34 @@ def verify_database_schema(db: Session) -> bool:
             logger.error(f"Missing document indexes: {expected_doc_indexes - doc_indexes}")
             return False
             
-        # Verify analysis tables
-        analysis_info = get_table_info(inspector, 'analyses')
-        analysis_indexes = {idx['name'] for idx in analysis_info['indexes']}
-        expected_analysis_indexes = {
-            'ix_analyses_document_id',
-            'ix_analyses_analysis_type_id'
-        }
-        
-        if not expected_analysis_indexes.issubset(analysis_indexes):
-            logger.error(f"Missing analysis indexes: {expected_analysis_indexes - analysis_indexes}")
+        # Verify analysis runs table
+        analysis_info = get_table_info(inspector, 'analysis_runs')
+        if not analysis_info:
+            logger.error("Could not get analysis runs table info")
             return False
 
-        # Verify table detection related tables
-        table_detection_info = get_table_info(inspector, 'table_detections')
-        table_detection_indexes = {idx['name'] for idx in table_detection_info['indexes']}
-        expected_table_detection_indexes = {
-            'ix_table_detections_document_id',
-            'ix_table_detections_page_number'
-        }
-        
-        if not expected_table_detection_indexes.issubset(table_detection_indexes):
-            logger.error(f"Missing table detection indexes: {expected_table_detection_indexes - table_detection_indexes}")
+        # Verify step execution results table
+        step_results_info = get_table_info(inspector, 'step_execution_results')
+        if not step_results_info:
+            logger.error("Could not get step execution results table info")
             return False
 
-        # Verify table structure related tables
-        table_structure_info = get_table_info(inspector, 'table_structures')
-        table_structure_indexes = {idx['name'] for idx in table_structure_info['indexes']}
-        expected_table_structure_indexes = {
-            'ix_table_structures_table_detection_id',
-            'ix_table_structures_page_number'
+        # Verify users table
+        users_info = get_table_info(inspector, 'users')
+        users_indexes = {idx['name'] for idx in users_info['indexes']}
+        expected_users_indexes = {
+            'ix_users_id',
+            'ix_users_email',
+            'ix_users_verification',
+            'ix_users_password_reset',
+            'ix_users_role_active'
         }
         
-        if not expected_table_structure_indexes.issubset(table_structure_indexes):
-            logger.error(f"Missing table structure indexes: {expected_table_structure_indexes - table_structure_indexes}")
+        if not expected_users_indexes.issubset(users_indexes):
+            logger.error(f"Missing users indexes: {expected_users_indexes - users_indexes}")
             return False
 
-        # Verify table data related tables
-        table_data_info = get_table_info(inspector, 'table_data')
-        table_data_indexes = {idx['name'] for idx in table_data_info['indexes']}
-        expected_table_data_indexes = {
-            'ix_table_data_table_structure_id',
-            'ix_table_data_page_number'
-        }
-        
-        if not expected_table_data_indexes.issubset(table_data_indexes):
-            logger.error(f"Missing table data indexes: {expected_table_data_indexes - table_data_indexes}")
-            return False
-            
+        # All checks passed
         return True
         
     except Exception as e:

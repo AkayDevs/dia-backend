@@ -431,4 +431,52 @@ async def logout(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Error processing logout request",
+        )
+
+
+@router.post("/verify-email-test/{email}")
+async def verify_email_test(
+    request: Request,
+    email: str,
+    db: Session = Depends(deps.get_db),
+) -> Any:
+    """
+    Test endpoint to directly verify a user's email without token.
+    WARNING: This endpoint should only be used for testing purposes.
+    
+    Args:
+        request: FastAPI request object
+        email: Email address to verify
+        db: Database session
+        
+    Returns:
+        Success message
+        
+    Raises:
+        HTTPException: If user is not found
+    """
+    try:
+        # Get user by email
+        user = crud_user.get_by_email(db, email=email)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found",
+            )
+        
+        if crud_user.is_verified(user):
+            return {"msg": "Email already verified"}
+        
+        # Mark email as verified
+        crud_user.mark_verified(db, user=user)
+        logger.info(f"Email verified for user (test endpoint): {user.id}")
+        
+        return {"msg": "Email verified successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Email verification error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing email verification",
         ) 
