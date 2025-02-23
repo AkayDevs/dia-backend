@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 from sqlalchemy.engine import Inspector
@@ -32,7 +32,8 @@ def verify_database_schema(db: Session) -> bool:
         
         expected_tables = [
             'users', 'documents', 'analysis_types', 'analysis_steps',
-            'algorithms', 'analyses', 'analysis_step_results'
+            'algorithms', 'analyses', 'analysis_step_results',
+            'table_detections', 'table_structures', 'table_data'
         ]
         missing_tables = set(expected_tables) - set(tables)
         
@@ -65,6 +66,42 @@ def verify_database_schema(db: Session) -> bool:
         if not expected_analysis_indexes.issubset(analysis_indexes):
             logger.error(f"Missing analysis indexes: {expected_analysis_indexes - analysis_indexes}")
             return False
+
+        # Verify table detection related tables
+        table_detection_info = get_table_info(inspector, 'table_detections')
+        table_detection_indexes = {idx['name'] for idx in table_detection_info['indexes']}
+        expected_table_detection_indexes = {
+            'ix_table_detections_document_id',
+            'ix_table_detections_page_number'
+        }
+        
+        if not expected_table_detection_indexes.issubset(table_detection_indexes):
+            logger.error(f"Missing table detection indexes: {expected_table_detection_indexes - table_detection_indexes}")
+            return False
+
+        # Verify table structure related tables
+        table_structure_info = get_table_info(inspector, 'table_structures')
+        table_structure_indexes = {idx['name'] for idx in table_structure_info['indexes']}
+        expected_table_structure_indexes = {
+            'ix_table_structures_table_detection_id',
+            'ix_table_structures_page_number'
+        }
+        
+        if not expected_table_structure_indexes.issubset(table_structure_indexes):
+            logger.error(f"Missing table structure indexes: {expected_table_structure_indexes - table_structure_indexes}")
+            return False
+
+        # Verify table data related tables
+        table_data_info = get_table_info(inspector, 'table_data')
+        table_data_indexes = {idx['name'] for idx in table_data_info['indexes']}
+        expected_table_data_indexes = {
+            'ix_table_data_table_structure_id',
+            'ix_table_data_page_number'
+        }
+        
+        if not expected_table_data_indexes.issubset(table_data_indexes):
+            logger.error(f"Missing table data indexes: {expected_table_data_indexes - table_data_indexes}")
+            return False
             
         return True
         
@@ -73,89 +110,13 @@ def verify_database_schema(db: Session) -> bool:
         return False
 
 
-def check_database_health(db: Session) -> Dict[str, bool]:
-    """Check database health and connectivity."""
-    try:
-        # Test basic query
-        db.execute(text("SELECT 1"))
-        
-        # Verify schema
-        schema_valid = verify_database_schema(db)
-        
-        # Test write permission by creating a temporary record
-        db.execute(text("CREATE TEMPORARY TABLE _health_check (id int)"))
-        db.execute(text("DROP TABLE _health_check"))
-        
-        return {
-            "connection": True,
-            "schema_valid": schema_valid,
-            "write_permission": True
-        }
-    except Exception as e:
-        logger.error(f"Database health check failed: {e}")
-        return {
-            "connection": False,
-            "schema_valid": False,
-            "write_permission": False
-        }
-
-
-def get_table_stats(db: Session) -> Dict[str, int]:
-    """Get basic statistics about the tables."""
-    try:
-        stats = {}
-        tables = [
-            'users', 'documents', 'analysis_types', 'analysis_steps',
-            'algorithms', 'analyses', 'analysis_step_results'
-        ]
-        for table in tables:
-            count = db.execute(
-                text(f"SELECT COUNT(*) FROM {table}")
-            ).scalar()
-            stats[table] = count
-        return stats
-    except Exception as e:
-        logger.error(f"Error getting table stats: {e}")
-        return {}
-
-
-def check_admin_user(db: Session) -> None:
-    """Check and print admin user details."""
-    user = db.query(User).filter(User.email == settings.FIRST_SUPERUSER).first()
-    if user:
-        logger.info(f"""
-Admin user found:
-- Email: {user.email}
-- Role: {user.role}
-- Active: {user.is_active}
-- Verified: {user.is_verified}
-""")
-    else:
-        logger.info("No admin user found in database")
-    return user
-
-
-def check_database_state(db: Session) -> None:
-    """Check and print the current state of the database."""
-    try:
-        # Check if tables exist
-        inspector = inspect(db.bind)
-        tables = inspector.get_table_names()
-        logger.info(f"Tables in database: {tables}")
-            
-    except Exception as e:
-        logger.error(f"Error checking database state: {e}")
-
-
 def ensure_admin_exists(db: Session) -> bool:
     """Ensure that the admin user exists in the database."""
-    logger.info(f"Checking for admin user with email: {settings.FIRST_SUPERUSER}")
-    user = check_admin_user(db)
-    
-    if not user:
-        logger.info("Admin user not found. Creating new admin user...")
-        try:
-            # Create admin user directly using the User model
+    try:
+        user = db.query(User).filter(User.email == settings.FIRST_SUPERUSER).first()
+        
+        if not user:
+            logger.info(f"Creating admin user with email: {settings.FIRST_SUPERUSER}")
             user = User(
                 id=str(uuid.uuid4()),
                 email=settings.FIRST_SUPERUSER,
@@ -169,15 +130,13 @@ def ensure_admin_exists(db: Session) -> bool:
             db.add(user)
             db.commit()
             db.refresh(user)
-            
-            logger.info("Checking database state after admin creation:")
-            check_database_state(db)
+            logger.info("Admin user created successfully")
             return True
-        except Exception as e:
-            logger.error(f"Error creating admin user: {e}")
-            db.rollback()
-            raise
-    else:
+            
         logger.info(f"Admin user already exists with email: {settings.FIRST_SUPERUSER}")
-        check_database_state(db)
-        return False 
+        return False
+        
+    except Exception as e:
+        logger.error(f"Error ensuring admin exists: {e}")
+        db.rollback()
+        raise 

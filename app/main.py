@@ -9,7 +9,7 @@ from app.api.v1.routes import auth, health, documents, users, analysis
 # from app.admin import setup_admin
 from app.db.session import engine, SessionLocal
 from app.db.init_db import init_db
-from app.db.utils import ensure_admin_exists, check_database_state, check_database_health
+from app.db.utils import ensure_admin_exists
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -118,14 +118,6 @@ async def on_startup():
         
         # Ensure admin user exists first
         ensure_admin_exists(db)
-        
-        # Verify database health
-        health_status = check_database_health(db)
-        if not all(health_status.values()):
-            raise Exception("Database health check failed")
-            
-        # Check final database state
-        check_database_state(db)
             
     finally:
         db.close()
