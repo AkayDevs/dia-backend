@@ -2,15 +2,15 @@ from typing import Dict, Any
 import cv2
 import numpy as np
 from app.services.analysis.configs.base import BaseAlgorithm
-from app.schemas.analysis.configs.algorithms import AlgorithmDefinitionInfo, AlgorithmParameter
+from app.schemas.analysis.configs.algorithms import AlgorithmDefinitionBase, AlgorithmParameter
 from app.enums.document import DocumentType
 from app.schemas.analysis.results.table_detection import TableDetectionResult
 
 class BasicTableDetectionAlgorithm(BaseAlgorithm):
     """Basic table detection using OpenCV"""
     
-    def get_info(self) -> AlgorithmDefinitionInfo:
-        return AlgorithmDefinitionInfo(
+    def get_info(self) -> AlgorithmDefinitionBase:
+        return AlgorithmDefinitionBase(
             code="basic_detection",
             name="Basic Table Detection",
             version="1.0.0",

@@ -1,13 +1,13 @@
 from typing import Dict, Any, Optional, List
 from app.services.analysis.configs.base import BaseStep
-from app.schemas.analysis.configs.steps import StepDefinitionInfo
+from app.schemas.analysis.configs.steps import StepDefinitionBase
 from app.schemas.analysis.configs.algorithms import AlgorithmParameter
 
 class TableDataStep(BaseStep):
     """Table data step implementation"""
     
-    def get_info(self) -> StepDefinitionInfo:
-        return StepDefinitionInfo(
+    def get_info(self) -> StepDefinitionBase:
+        return StepDefinitionBase(
             code="table_data",
             name="Table Data",
             version="1.0.0",

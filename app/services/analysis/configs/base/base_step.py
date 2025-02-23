@@ -1,13 +1,13 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, List
-from app.schemas.analysis.configs.steps import StepDefinitionInfo
+from app.schemas.analysis.configs.steps import StepDefinitionBase
 from app.schemas.analysis.executions import StepExecutionResultInfo
 
 class BaseStep(ABC):
     """Base class for all step implementations"""
     
     @abstractmethod
-    def get_info(self) -> StepDefinitionInfo:
+    def get_info(self) -> StepDefinitionBase:
         """Get step definition information"""
         pass
     

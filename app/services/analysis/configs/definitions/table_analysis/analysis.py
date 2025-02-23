@@ -1,18 +1,14 @@
 from typing import Dict, Any, List
 from app.services.analysis.configs.base.base_definition import BaseDefinition
-from app.schemas.analysis.configs.definitions import AnalysisDefinitionInfo
+from app.schemas.analysis.configs.definitions import AnalysisDefinitionBase
 from app.schemas.document import Document
 from app.enums.document import DocumentType
-from app.services.analysis.configs.registry import AnalysisRegistry
-from .steps.table_detection import TableDetectionStep
-from .steps.table_structure import TableStructureStep
-from .steps.table_data import TableDataStep
 
 class TableAnalysis(BaseDefinition):
     """Table analysis implementation"""
     
-    def get_info(self) -> AnalysisDefinitionInfo:
-        return AnalysisDefinitionInfo(
+    def get_info(self) -> AnalysisDefinitionBase:
+        return AnalysisDefinitionBase(
             code="table_analysis",
             name="Table Analysis",
             version="1.0.0",

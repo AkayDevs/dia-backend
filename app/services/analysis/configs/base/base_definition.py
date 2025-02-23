@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, List
-from app.schemas.analysis.configs.definitions import AnalysisDefinitionInfo
+from app.schemas.analysis.configs.definitions import AnalysisDefinitionBase
 from app.schemas.document import Document as DocumentInfo
 from app.enums.document import DocumentType
 
@@ -8,7 +8,7 @@ class BaseDefinition(ABC):
     """Base class for all analysis definition implementations"""
     
     @abstractmethod
-    def get_info(self) -> AnalysisDefinitionInfo:
+    def get_info(self) -> AnalysisDefinitionBase:
         """Get analysis definition information"""
         pass
     

@@ -1,12 +1,12 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
-from app.schemas.analysis.configs.algorithms import AlgorithmDefinitionInfo
+from app.schemas.analysis.configs.algorithms import AlgorithmDefinitionBase
 
 class BaseAlgorithm(ABC):
     """Base class for all algorithm implementations"""
     
     @abstractmethod
-    def get_info(self) -> AlgorithmDefinitionInfo:
+    def get_info(self) -> AlgorithmDefinitionBase:
         """Get algorithm definition information"""
         pass
     

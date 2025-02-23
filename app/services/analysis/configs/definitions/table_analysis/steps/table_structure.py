@@ -1,13 +1,13 @@
 from typing import Dict, Any, Optional, List
 from app.services.analysis.configs.base import BaseStep
-from app.schemas.analysis.configs.steps import StepDefinitionInfo
+from app.schemas.analysis.configs.steps import StepDefinitionBase
 from app.schemas.analysis.configs.algorithms import AlgorithmParameter
 
 class TableStructureStep(BaseStep):
     """Table structure step implementation"""
     
-    def get_info(self) -> StepDefinitionInfo:
-        return StepDefinitionInfo(
+    def get_info(self) -> StepDefinitionBase:
+        return StepDefinitionBase(
             code="table_structure",
             name="Table Structure",
             version="1.0.0",
