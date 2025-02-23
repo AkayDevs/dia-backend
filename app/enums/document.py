@@ -15,6 +15,7 @@ class DocumentType(str, Enum):
 MIME_TYPES = {
     'application/pdf': DocumentType.PDF,
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document': DocumentType.DOCX,
+    'application/msword': DocumentType.DOCX,
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': DocumentType.XLSX,
     'image/jpeg': DocumentType.IMAGE,
     'image/png': DocumentType.IMAGE,

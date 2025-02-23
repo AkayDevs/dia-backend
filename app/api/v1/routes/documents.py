@@ -3,7 +3,7 @@ from fastapi import (
     APIRouter, 
     Depends, 
     HTTPException, 
-    UploadFile, 
+    UploadFile,
     File, 
     status, 
     Query,

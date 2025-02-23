@@ -2,6 +2,7 @@ from typing import Optional, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
 from app.enums.analysis import AnalysisStatus
+from app.schemas.analysis.results.base import BaseResultSchema
 
 class StepExecutionResultBase(BaseModel):
     """Base schema for step execution result data"""
@@ -18,7 +19,7 @@ class StepExecutionResultUpdate(BaseModel):
     """Schema for updating a step execution result"""
     status: Optional[AnalysisStatus] = None
     parameters: Optional[Dict[str, Any]] = None
-    result: Optional[Dict[str, Any]] = None
+    result: Optional[BaseResultSchema] = None
     user_corrections: Optional[Dict[str, Any]] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -28,8 +29,14 @@ class StepExecutionResultInDB(StepExecutionResultBase):
     """Schema for step execution result as stored in database"""
     id: str
     status: AnalysisStatus
-    result: Optional[Dict[str, Any]] = None
-    user_corrections: Optional[Dict[str, Any]] = None
+    result: Optional[BaseResultSchema] = Field(
+        default=None,
+        description="Validated analysis result following the step's result schema"
+    )
+    user_corrections: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="User-provided corrections to the result"
+    )
     created_at: datetime
     updated_at: Optional[datetime] = None
     started_at: Optional[datetime] = None

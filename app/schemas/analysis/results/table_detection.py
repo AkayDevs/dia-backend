@@ -1,7 +1,7 @@
 from typing import List, Dict, Any, Optional
 from pydantic import Field, BaseModel
 from app.schemas.analysis.results.base import BaseResultSchema
-from app.schemas.results.shared import Confidence, PageInfo, BoundingBox
+from app.schemas.analysis.results.table_shared import Confidence, PageInfo, BoundingBox
 
 class TableLocation(BaseModel):
     """Standard table location information."""
