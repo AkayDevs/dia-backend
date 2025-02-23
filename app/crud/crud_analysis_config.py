@@ -90,6 +90,15 @@ class CRUDStepDefinition(CRUDBase[StepDefinition, StepDefinitionCreate, StepDefi
             )
             .first()
         )
+    
+    def validate_result_schema(self, result_schema_path: str) -> bool:
+        """Validate that the result schema path exists and is valid"""
+        try:
+            from app.services.analysis.results.schema_loader import ResultSchemaLoader
+            ResultSchemaLoader.load_schema(result_schema_path)
+            return True
+        except (ImportError, AttributeError):
+            return False
 
 class CRUDAlgorithmDefinition(CRUDBase[AlgorithmDefinition, AlgorithmDefinitionCreate, AlgorithmDefinitionUpdate]):
     def get_by_step(self, db: Session, step_id: str) -> List[AlgorithmDefinition]:

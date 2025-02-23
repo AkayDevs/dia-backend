@@ -94,6 +94,11 @@ def init_analysis_db(db: Session) -> None:
                 
                 if not db_step:
                     logger.info(f"Creating step: {step.name} v{step.version}")
+                    # Validate result schema path
+                    if not crud_analysis_config.step_definition.validate_result_schema(step.result_schema_path):
+                        logger.warning(f"Invalid result schema path: {step.result_schema_path}")
+                        continue
+                        
                     db_step = crud_analysis_config.step_definition.create(
                         db,
                         obj_in=StepDefinitionCreate(
@@ -104,13 +109,18 @@ def init_analysis_db(db: Session) -> None:
                             order=step.order,
                             analysis_definition_id=str(db_definition.id),
                             base_parameters=step.base_parameters,
-                            result_schema=step.result_schema,
+                            result_schema_path=step.result_schema_path,
                             implementation_path=step.implementation_path,
                             is_active=True
                         )
                     )
                 else:
                     logger.info(f"Updating step: {step.name} v{step.version}")
+                    # Validate result schema path
+                    if not crud_analysis_config.step_definition.validate_result_schema(step.result_schema_path):
+                        logger.warning(f"Invalid result schema path: {step.result_schema_path}")
+                        continue
+                        
                     crud_analysis_config.step_definition.update(
                         db,
                         db_obj=db_step,
@@ -119,7 +129,7 @@ def init_analysis_db(db: Session) -> None:
                             description=step.description,
                             order=step.order,
                             base_parameters=step.base_parameters,
-                            result_schema=step.result_schema,
+                            result_schema_path=step.result_schema_path,
                             implementation_path=step.implementation_path,
                             is_active=True
                         )

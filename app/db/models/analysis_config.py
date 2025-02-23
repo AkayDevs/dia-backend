@@ -37,7 +37,7 @@ class StepDefinition(Base):
     description = Column(String(500))
     order = Column(Integer, nullable=False)
     analysis_definition_id = Column(String(36), ForeignKey("analysis_definitions.id"), nullable=False)
-    result_schema = Column(String(255), nullable=False)
+    result_schema_path = Column(String(255), nullable=False)
     base_parameters = Column(JSON)
     implementation_path = Column(String(255), nullable=False)
     is_active = Column(Boolean, nullable=False, server_default='1')
