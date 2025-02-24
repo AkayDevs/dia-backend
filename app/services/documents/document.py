@@ -269,6 +269,39 @@ def _process_docx_to_images(docx_path: Path, pages_dir: Path, user_id: str, docu
             detail=f"Failed to process document file: {str(e)}"
         )
 
+def _get_existing_pages(pages_dir: Path, user_id: str, document_id: str) -> Optional[List[DocumentPage]]:
+    """Check if pages already exist for the document and return them."""
+    try:
+        if not pages_dir.exists():
+            return None
+            
+        # Get all PNG files in the pages directory
+        page_files = sorted(pages_dir.glob("*.png"), key=lambda x: int(x.stem.split('_')[1]))
+        
+        if not page_files:
+            return None
+            
+        pages = []
+        for idx, page_file in enumerate(page_files, 1):
+            # Get image dimensions
+            with Image.open(page_file) as img:
+                width, height = img.size
+                
+            pages.append(_create_document_page(
+                page_number=idx,
+                width=width,
+                height=height,
+                filename=page_file.name,
+                user_id=user_id,
+                document_id=document_id
+            ))
+            
+        return pages if pages else None
+        
+    except Exception as e:
+        logger.warning(f"Error checking existing pages: {str(e)}")
+        return None
+
 async def extract_document_pages(document_path: str, document_type: DocumentType, user_id: str, document_id: str) -> DocumentPages:
     """
     Extract pages from a document and convert them to images.
@@ -297,6 +330,17 @@ async def extract_document_pages(document_path: str, document_type: DocumentType
         # Get validated paths
         full_path = _validate_document_path(document_path, user_id)
         _, pages_dir = _setup_document_directories(user_id, document_id)
+        
+        # Check for existing pages
+        existing_pages = _get_existing_pages(pages_dir, user_id, document_id)
+        if existing_pages:
+            logger.info(f"Using existing pages for document {document_id}")
+            return DocumentPages(
+                total_pages=len(existing_pages),
+                pages=existing_pages
+            )
+            
+        # If no existing pages, extract them
         pages = []
         
         if document_type == DocumentType.PDF:
