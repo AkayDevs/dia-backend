@@ -2979,6 +2979,20 @@ files = [
 ]
 
 [[package]]
+name = "unoserver"
+version = "3.1"
+description = "A server for file conversions with Libre Office"
+optional = false
+python-versions = ">=3.8"
+files = [
+    {file = "unoserver-3.1-py3-none-any.whl", hash = "sha256:d50989f86358a0792ecabfbe7556a2d1090fc0fb45a3b83fff4792347b8880eb"},
+    {file = "unoserver-3.1.tar.gz", hash = "sha256:3df6470a7a2492fa4841d874ad24b62dec3dee116f6beffbb4b41cf48eedb828"},
+]
+
+[package.extras]
+devenv = ["black", "check-manifest", "flake8", "pyroma", "pytest", "pytest-cov", "zest.releaser"]
+
+[[package]]
 name = "urllib3"
 version = "2.3.0"
 description = "HTTP library with thread-safe connection pooling, file post, and more."
@@ -3327,4 +3341,4 @@ email = ["email-validator"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10.5,<3.12"
-content-hash = "314577f208fbcb7a0b90c752423a966d4625ad405d926c2e3fecc1f2b9cc9374"
+content-hash = "12ab6e8c769bf35d2f6e82b89b8ed96b14803374629fcb27a708a743bd19c8c8"

@@ -3,7 +3,7 @@ import fitz  # PyMuPDF
 from pathlib import Path
 import os
 import shutil
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import io
 import logging
 from fastapi import HTTPException, status
@@ -199,22 +199,29 @@ def _process_xlsx_to_images(xlsx_path: Path, pages_dir: Path, user_id: str, docu
         )
 
 def _process_docx_to_images(docx_path: Path, pages_dir: Path, user_id: str, document_id: str) -> List[DocumentPage]:
-    """Convert DOCX file to images."""
+    """Convert DOC/DOCX file to images by first converting to PDF."""
     try:
-        # Check for poppler installation
-        if not shutil.which('pdftoppm'):
-            logger.error("Poppler is not installed. Please install poppler-utils.")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Document conversion dependency (poppler) is not installed. Please contact system administrator."
-            )
+        # Validate file exists and is not empty
+        if not docx_path.exists() or docx_path.stat().st_size == 0:
+            raise ValueError("File is empty or does not exist")
 
-        # Create a temporary directory for conversion
+        # Check if LibreOffice is installed
+        import subprocess
+        try:
+            process = subprocess.run(['soffice', '--version'], capture_output=True, text=True)
+            if process.returncode != 0:
+                logger.error("LibreOffice is not properly installed")
+                raise ValueError("Document conversion software (LibreOffice) is not properly installed")
+            logger.info(f"Found LibreOffice: {process.stdout.strip()}")
+        except FileNotFoundError:
+            logger.error("LibreOffice (soffice) command not found")
+            raise ValueError("Document conversion software (LibreOffice) is not installed")
+
+        # Create a temporary directory for PDF conversion
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_pdf = Path(temp_dir) / "temp.pdf"
             
-            # Convert DOCX to PDF using libreoffice
-            import subprocess
+            # Convert DOC/DOCX to PDF using LibreOffice
             process = subprocess.run([
                 'soffice',
                 '--headless',
@@ -224,50 +231,42 @@ def _process_docx_to_images(docx_path: Path, pages_dir: Path, user_id: str, docu
             ], capture_output=True, text=True)
             
             if process.returncode != 0:
-                logger.error(f"LibreOffice conversion failed: {process.stderr}")
-                raise Exception("Failed to convert DOCX to PDF")
-            
+                logger.error(f"Document conversion failed: {process.stderr}")
+                raise ValueError("Failed to convert document to PDF")
+
+            # Find the converted PDF file (it might have a different name)
+            pdf_files = list(Path(temp_dir).glob("*.pdf"))
+            if not pdf_files:
+                raise ValueError("PDF conversion failed - no output file found")
+            temp_pdf = pdf_files[0]
+
+            # Now process the PDF using our existing PDF processing code
             try:
-                # Convert PDF to images
-                images = pdf2image.convert_from_path(
-                    str(temp_pdf),
-                    dpi=300,
-                    fmt="png",
-                    thread_count=os.cpu_count() or 1
-                )
-            except pdf2image.exceptions.PDFPageCountError:
-                logger.error("Failed to convert PDF to images. Please ensure poppler is properly installed.")
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Failed to convert document pages. Please ensure all dependencies are installed."
-                )
-            
-            pages = []
-            for idx, image in enumerate(images):
-                image_filename = f"page_{idx + 1}.png"
-                image_path = pages_dir / image_filename
-                
-                # Save image with optimization
-                width, height = _save_image_with_optimization(image, image_path)
-                
-                pages.append(_create_document_page(
-                    page_number=idx + 1,
-                    width=width,
-                    height=height,
-                    filename=image_filename,
-                    user_id=user_id,
-                    document_id=document_id
-                ))
-            
-            return pages
-            
-    except HTTPException:
-        raise
+                doc = fitz.open(str(temp_pdf))
+                try:
+                    # Process pages in parallel for better performance
+                    with ThreadPoolExecutor() as executor:
+                        args = [(doc, i, pages_dir, user_id, document_id) 
+                               for i in range(len(doc))]
+                        pages = list(executor.map(_process_pdf_page, args))
+                finally:
+                    doc.close()
+                return pages
+            except Exception as e:
+                logger.error(f"Error processing converted PDF: {str(e)}")
+                raise ValueError(f"Error processing converted PDF: {str(e)}")
+
+    except ValueError as ve:
+        logger.error(f"Error processing document: {str(ve)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
     except Exception as e:
-        logger.error(f"Error processing DOCX file: {str(e)}")
+        logger.error(f"Error processing document file: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to process DOCX file. Please ensure all dependencies (poppler and libreoffice) are installed."
+            detail=f"Failed to process document file: {str(e)}"
         )
 
 async def extract_document_pages(document_path: str, document_type: DocumentType, user_id: str, document_id: str) -> DocumentPages:
