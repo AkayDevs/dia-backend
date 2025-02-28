@@ -4,7 +4,8 @@ from .analysis_run import (
     AnalysisRunUpdate,
     AnalysisRunInDB,
     AnalysisRunInfo,
-    AnalysisRunWithResults
+    AnalysisRunWithResults,
+    AnalysisRunConfig
 )
 from .step_result import (
     StepExecutionResultBase,
@@ -25,5 +26,6 @@ __all__ = [
     "StepExecutionResultCreate",
     "StepExecutionResultUpdate",
     "StepExecutionResultInDB",
-    "StepExecutionResultInfo"
+    "StepExecutionResultInfo",
+    "AnalysisRunConfig"
 ] 

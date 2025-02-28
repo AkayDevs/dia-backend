@@ -52,7 +52,7 @@ async def register(
         user = crud_user.create(db, obj_in=user_in)
         logger.info(f"User registered successfully: {user.id}")
         
-        # TODO: Send verification email
+        # TODO: WSSO Authentication
         # verification_token = security.create_email_verification_token(user.email)
         # send_verification_email(user.email, verification_token)
         

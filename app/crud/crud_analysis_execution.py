@@ -1,105 +1,107 @@
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, desc
 from fastapi.encoders import jsonable_encoder
 from datetime import datetime
 import logging
+from uuid import uuid4
 
 from app.crud.base import CRUDBase
 from app.db.models.analysis_execution import AnalysisRun, StepExecutionResult
 from app.db.models.analysis_config import StepDefinition, AlgorithmDefinition
-from app.analysis.schemas.types import Analysis as AnalysisSchema, AnalysisConfig
-from app.analysis.schemas.steps import AnalysisStepResult as StepExecutionResultSchema
+from app.schemas.analysis.executions.analysis_run import (
+    AnalysisRunCreate,
+    AnalysisRunUpdate,
+    AnalysisRunInDB,
+    AnalysisRunConfig,
+    StepConfig,
+)
+from app.schemas.analysis.executions.step_result import (
+    StepExecutionResultCreate,
+    StepExecutionResultUpdate,
+    StepExecutionResultInDB
+)
+from app.enums.analysis import AnalysisStatus, AnalysisMode
+from app.schemas.analysis.results.base import BaseResultSchema
+from app.services.analysis.configs.registry import AnalysisRegistry
 
 logger = logging.getLogger(__name__)
 
-class CRUDAnalysisRun(CRUDBase[AnalysisRun, AnalysisSchema, AnalysisConfig]):
+class CRUDAnalysisRun(CRUDBase[AnalysisRun, AnalysisRunCreate, AnalysisRunUpdate]):
+    """CRUD operations for analysis runs."""
+    
     def create_with_steps(
         self,
         db: Session,
         *,
-        obj_in: AnalysisSchema,
-        algorithm_configs: Dict[str, Dict[str, Any]]
+        obj_in: AnalysisRunCreate
     ) -> AnalysisRun:
+        """
+        Create an analysis run with its associated step results.
+        The configuration in obj_in should be complete, with all defaults already applied.
+        
+        Args:
+            db: Database session
+            obj_in: Analysis run creation data with complete configuration
+            
+        Returns:
+            Created analysis run with step results
+        """
+        # Create the analysis run
         obj_in_data = jsonable_encoder(obj_in)
-        db_obj = self.model(**obj_in_data)
+        db_obj = self.model(
+            id=str(uuid4()),
+            **obj_in_data,
+            status=AnalysisStatus.PENDING
+        )
         db.add(db_obj)
         db.flush()  # Get the ID without committing
 
-        # Get all active steps for this analysis definition
-        steps = db.query(StepDefinition).filter(
-            StepDefinition.analysis_definition_id == str(obj_in.analysis_definition_id),
-            StepDefinition.is_active == True
-        ).order_by(StepDefinition.order).all()
-
-        # Create step results
+        # Get steps from registry
+        steps = AnalysisRegistry.list_steps(obj_in.analysis_code)
+        
+        # Create step results for each enabled step
         for step in steps:
-            step_config = algorithm_configs.get(str(step.id), {})
-            
-            # Get algorithm based on configuration
-            algorithm_id = None
-            parameters = {}
-            
-            if "algorithm_code" in step_config and "algorithm_version" in step_config:
-                # Find algorithm by code and version
-                algorithm = db.query(AlgorithmDefinition).filter(
-                    AlgorithmDefinition.step_id == step.id,
-                    AlgorithmDefinition.code == step_config["algorithm_code"],
-                    AlgorithmDefinition.version == step_config["algorithm_version"],
-                    AlgorithmDefinition.is_active == True
-                ).first()
-                if algorithm:
-                    algorithm_id = algorithm.id
-                    parameters = step_config.get("parameters", {})
-                    # Add any missing parameters with their defaults
-                    for param in algorithm.parameters:
-                        if isinstance(param, dict) and param['name'] not in parameters and param.get('default') is not None:
-                            parameters[param['name']] = param['default']
-                else:
-                    logger.warning(
-                        f"Specified algorithm {step_config['algorithm_code']} "
-                        f"v{step_config['algorithm_version']} not found or not active"
-                    )
-            
-            # If no algorithm specified or found, get the default
-            if not algorithm_id:
-                default_algorithm = db.query(AlgorithmDefinition).filter(
-                    AlgorithmDefinition.step_id == step.id,
-                    AlgorithmDefinition.is_active == True
-                ).first()
+            try:
+                step_code = f"{obj_in.analysis_code}.{step.code}"
+                step_config = obj_in.config.steps.get(step_code)
                 
-                if default_algorithm:
-                    algorithm_id = default_algorithm.id
-                    # Get default parameters
-                    parameters = {}
-                    for param in default_algorithm.parameters:
-                        if isinstance(param, dict) and param.get('default') is not None:
-                            parameters[param['name']] = param['default']
-                else:
-                    logger.warning(f"No active algorithm found for step {step.id}")
+                # Skip if step is disabled or no config found
+                if not step_config or not step_config.enabled:
+                    logger.info(f"Skipping disabled or unconfigured step {step_code}")
                     continue
 
-            # Create step result
-            step_result = StepExecutionResult(
-                analysis_run_id=db_obj.id,
-                step_definition_id=step.id,
-                algorithm_definition_id=algorithm_id,
-                parameters=parameters,
-                status="pending"
-            )
-            db.add(step_result)
+                # Create step result
+                step_result = StepExecutionResult(
+                    id=str(uuid4()),
+                    analysis_run_id=db_obj.id,
+                    step_code=step_code,
+                    algorithm_code=step_config.algorithm.code if step_config.algorithm else None,
+                    parameters=step_config.algorithm.parameters if step_config.algorithm else {},
+                    status=AnalysisStatus.PENDING,
+                    timeout=step_config.timeout,
+                    retry_count=step_config.retry
+                )
+                db.add(step_result)
+
+            except Exception as e:
+                logger.error(f"Error creating step result for step {step_code}: {str(e)}")
+                continue
 
         db.commit()
         db.refresh(db_obj)
         return db_obj
 
     def get_by_document(
-        self, db: Session, document_id: str
+        self, db: Session, document_id: str, skip: int = 0, limit: int = 100
     ) -> List[AnalysisRun]:
+        """Get all analysis runs for a specific document."""
         return (
             db.query(self.model)
             .filter(self.model.document_id == document_id)
             .order_by(desc(self.model.created_at))
+            .offset(skip)
+            .limit(limit)
             .all()
         )
 
@@ -108,12 +110,15 @@ class CRUDAnalysisRun(CRUDBase[AnalysisRun, AnalysisSchema, AnalysisConfig]):
         db: Session,
         *,
         db_obj: AnalysisRun,
-        status: str,
+        status: AnalysisStatus,
         error_message: Optional[str] = None
     ) -> AnalysisRun:
+        """Update the status of an analysis run."""
         db_obj.status = status
-        if status == "completed":
+        if status == AnalysisStatus.COMPLETED:
             db_obj.completed_at = datetime.utcnow()
+        if status == AnalysisStatus.IN_PROGRESS and not db_obj.started_at:
+            db_obj.started_at = datetime.utcnow()
         if error_message:
             db_obj.error_message = error_message
         db_obj.updated_at = datetime.utcnow()
@@ -130,16 +135,13 @@ class CRUDAnalysisRun(CRUDBase[AnalysisRun, AnalysisSchema, AnalysisConfig]):
         skip: int = 0,
         limit: int = 100
     ) -> List[AnalysisRun]:
+        """Get multiple analysis runs with filters."""
         query = db.query(self.model)
         
         # Join with Document if we need to filter by document type
         if "document_type" in filters:
             query = query.join(AnalysisRun.document)
             
-        # Join with AnalysisDefinition if we need to filter by analysis type code
-        if "analysis_type_code" in filters:
-            query = query.join(AnalysisRun.analysis_definition)
-        
         # Build filter conditions
         conditions = []
         
@@ -149,11 +151,8 @@ class CRUDAnalysisRun(CRUDBase[AnalysisRun, AnalysisSchema, AnalysisConfig]):
         if "status" in filters:
             conditions.append(AnalysisRun.status == filters["status"])
             
-        if "analysis_definition_id" in filters:
-            conditions.append(AnalysisRun.analysis_definition_id == filters["analysis_definition_id"])
-            
-        if "analysis_type_code" in filters:
-            conditions.append(AnalysisRun.analysis_definition.has(code=filters["analysis_type_code"]))
+        if "analysis_code" in filters:
+            conditions.append(AnalysisRun.analysis_code == filters["analysis_code"])
             
         if "document_type" in filters:
             conditions.append(AnalysisRun.document.has(type=filters["document_type"]))
@@ -176,15 +175,17 @@ class CRUDAnalysisRun(CRUDBase[AnalysisRun, AnalysisSchema, AnalysisConfig]):
         
         return query.all()
 
-class CRUDStepExecutionResult(CRUDBase[StepExecutionResult, StepExecutionResultSchema, StepExecutionResultSchema]):
+class CRUDStepExecutionResult(CRUDBase[StepExecutionResult, StepExecutionResultCreate, StepExecutionResultUpdate]):
+    """CRUD operations for step execution results."""
+    
     def get_by_analysis_run(
         self, db: Session, analysis_run_id: str
     ) -> List[StepExecutionResult]:
+        """Get all step results for a specific analysis run."""
         return (
             db.query(self.model)
-            .join(StepDefinition)
             .filter(self.model.analysis_run_id == analysis_run_id)
-            .order_by(StepDefinition.order)
+            .order_by(self.model.created_at)
             .all()
         )
 
@@ -193,14 +194,17 @@ class CRUDStepExecutionResult(CRUDBase[StepExecutionResult, StepExecutionResultS
         db: Session,
         *,
         db_obj: StepExecutionResult,
-        result: Dict[str, Any],
-        status: str = "completed",
+        result: Union[Dict[str, Any], BaseResultSchema],
+        status: AnalysisStatus = AnalysisStatus.COMPLETED,
         error_message: Optional[str] = None
     ) -> StepExecutionResult:
-        db_obj.result = result
+        """Update the result of a step execution."""
+        db_obj.result = result if isinstance(result, dict) else result.dict()
         db_obj.status = status
-        if status == "completed":
+        if status == AnalysisStatus.COMPLETED:
             db_obj.completed_at = datetime.utcnow()
+        if status == AnalysisStatus.IN_PROGRESS and not db_obj.started_at:
+            db_obj.started_at = datetime.utcnow()
         if error_message:
             db_obj.error_message = error_message
         db_obj.updated_at = datetime.utcnow()
@@ -216,6 +220,7 @@ class CRUDStepExecutionResult(CRUDBase[StepExecutionResult, StepExecutionResultS
         db_obj: StepExecutionResult,
         corrections: Dict[str, Any]
     ) -> StepExecutionResult:
+        """Update user corrections for a step result."""
         db_obj.user_corrections = corrections
         db_obj.updated_at = datetime.utcnow()
         db.add(db_obj)
@@ -225,3 +230,21 @@ class CRUDStepExecutionResult(CRUDBase[StepExecutionResult, StepExecutionResultS
 
 analysis_run = CRUDAnalysisRun(AnalysisRun)
 step_execution_result = CRUDStepExecutionResult(StepExecutionResult)
+
+def import_class(path: str) -> Any:
+    """
+    Dynamically import a class from a string path.
+    
+    Args:
+        path: Full path to the class (e.g., 'app.services.analysis.implementations.my_step.MyStep')
+    
+    Returns:
+        The class object
+    """
+    try:
+        module_path, class_name = path.rsplit('.', 1)
+        module = __import__(module_path, fromlist=[class_name])
+        return getattr(module, class_name)
+    except Exception as e:
+        logger.error(f"Error importing class {path}: {str(e)}")
+        raise ImportError(f"Could not import class {path}")

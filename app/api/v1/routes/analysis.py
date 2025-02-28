@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 
 from app.db import deps
-from app.crud import crud_analysis_config, crud_document
+from app.crud import crud_analysis_config, crud_document, crud_analysis_execution
 from app.schemas.analysis.configs.definitions import (
     AnalysisDefinitionInfo,
     AnalysisDefinitionWithSteps,
@@ -18,13 +18,15 @@ from app.schemas.analysis.executions import (
     AnalysisRunInfo,
     AnalysisRunWithResults,
     StepExecutionResultInfo,
-    StepExecutionResultUpdate
+    StepExecutionResultUpdate,
+    AnalysisRunConfig
 )
 from app.db.models.user import User
 from app.services.analysis.executions.orchestrator import AnalysisOrchestrator
 from app.schemas.document import DocumentType
-from app.enums.analysis import AnalysisMode, AnalysisStatus
-
+from app.enums.analysis import AnalysisMode, AnalysisStatus, AnalysisProcessingType
+from app.services.analysis.configs.utils import prepare_analysis_config
+from app.services.analysis.configs.registry import AnalysisRegistry
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
@@ -71,7 +73,7 @@ async def start_analysis(
     document_id: str,
     analysis_definition_id: str,
     mode: AnalysisMode = AnalysisMode.AUTOMATIC,
-    algorithm_configs: Optional[Dict[str, Dict[str, Any]]] = None,
+    config: Optional[AnalysisRunConfig] = None,
     background_tasks: BackgroundTasks = None,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_verified_user),
@@ -83,14 +85,10 @@ async def start_analysis(
         document_id: ID of the document to analyze
         analysis_definition_id: ID of the analysis definition to use
         mode: Analysis execution mode (automatic or step_by_step)
-        algorithm_configs: Optional configurations for specific steps
-            Format: {
-                "step_id": {
-                    "algorithm_code": "algorithm_code",
-                    "algorithm_version": "1.0.0",
-                    "parameters": {"param1": "value1"}
-                }
-            }
+        config: Optional configuration for the analysis run including:
+            - steps: Configuration for each step (algorithms, parameters, etc.)
+            - notifications: WebSocket notification settings
+            - metadata: Additional metadata for the run
     """
     # Verify document exists and user has access
     document = crud_document.document.get(db, id=document_id)
@@ -106,7 +104,7 @@ async def start_analysis(
         )
 
     # Verify analysis definition exists and is active
-    definition = crud_analysis_config.analysis_definition.get(db, id=analysis_definition_id)
+    definition = AnalysisRegistry.get_analysis_definition(analysis_definition_id)
     if not definition or not definition.is_active:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -121,17 +119,26 @@ async def start_analysis(
         )
 
     try:
-        # Create analysis run
-        analysis_create = AnalysisRunCreate(
-            document_id=document_id,
-            analysis_definition_id=analysis_definition_id,
-            mode=mode
+        # Prepare complete configuration with defaults
+        complete_config = prepare_analysis_config(
+            user=current_user,
+            document=document,
+            analysis_code=definition.code,
+            analysis_processing_type=AnalysisProcessingType.SINGLE,
+            user_config=config
         )
         
-        analysis_run = crud_analysis_config.analysis_run.create_with_steps(
+        # Create analysis run with complete configuration
+        analysis_create = AnalysisRunCreate(
+            document_id=document_id,
+            analysis_code=definition.code,
+            mode=mode,
+            config=complete_config
+        )
+        
+        analysis_run = crud_analysis_execution.analysis_run.create_with_steps(
             db=db,
-            obj_in=analysis_create,
-            algorithm_configs=algorithm_configs or {}
+            obj_in=analysis_create
         )
 
         # Start analysis in background for automatic mode

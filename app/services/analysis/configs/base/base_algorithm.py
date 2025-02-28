@@ -1,13 +1,18 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
-from app.schemas.analysis.configs.algorithms import AlgorithmDefinitionBase
-
+from typing import Dict, Any, Optional, List
+from app.schemas.analysis.configs.algorithms import AlgorithmDefinitionBase, AlgorithmParameterValue
+from app.schemas.analysis.executions.analysis_run import AlgorithmSelection
 class BaseAlgorithm(ABC):
     """Base class for all algorithm implementations"""
     
     @abstractmethod
     def get_info(self) -> AlgorithmDefinitionBase:
         """Get algorithm definition information"""
+        pass
+
+    @abstractmethod
+    def get_default_parameters(self) -> List[AlgorithmParameterValue]:
+        """Get default parameters for the algorithm"""
         pass
     
     @abstractmethod

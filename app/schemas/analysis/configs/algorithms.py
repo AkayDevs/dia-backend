@@ -14,6 +14,11 @@ class AlgorithmParameter(BaseModel):
         None, description="Parameter constraints (e.g., min, max, pattern)"
     )
 
+class AlgorithmParameterValue(BaseModel):
+    """Schema for algorithm parameter value"""
+    name: str = Field(..., description="Parameter name")
+    value: Any = Field(..., description="Parameter value")
+
 class AlgorithmDefinitionBase(BaseModel):
     """Base schema for algorithm definition data"""
     code: str = Field(..., description="Unique identifier code")
@@ -70,6 +75,6 @@ class AlgorithmSelection(BaseModel):
     """Schema for selecting an algorithm for a step"""
     code: str = Field(..., description="Algorithm code")
     version: str = Field(..., description="Algorithm version")
-    parameters: Optional[List[AlgorithmParameter]] = Field(
+    parameters: Optional[List[AlgorithmParameterValue]] = Field(
         None, description="Algorithm parameters"
     )

@@ -1,5 +1,13 @@
 from enum import Enum
 
+
+class AnalysisProcessingType(str, Enum):
+    """
+    Enum for the processing type of an analysis.
+    """
+    SINGLE = "single"
+    BATCH = "batch"
+
 class AnalysisMode(str, Enum):
     """
     Enum for the mode of an analysis.

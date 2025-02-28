@@ -1,7 +1,7 @@
 from typing import Dict, Any, Optional, List
 from app.services.analysis.configs.base import BaseStep
 from app.schemas.analysis.configs.steps import StepDefinitionBase
-from app.schemas.analysis.configs.algorithms import AlgorithmParameter
+from app.schemas.analysis.configs.algorithms import AlgorithmParameter, AlgorithmSelection
 
 class TableDetectionStep(BaseStep):
     """Table detection step implementation"""
@@ -25,6 +25,13 @@ class TableDetectionStep(BaseStep):
             result_schema_path="app.schemas.analysis.results.table_detection.TableDetectionResult",
             implementation_path="app.services.analysis.configs.definitions.table_analysis.steps.table_detection.TableDetectionStep",
             is_active=True
+        )
+    
+    def get_default_algorithm(self) -> Optional[AlgorithmSelection]:
+        return AlgorithmSelection(
+            algorithm_code="table_detection",
+            algorithm_version="1.0.0",
+            parameters={}
         )
     
     async def validate_requirements(self) -> None:

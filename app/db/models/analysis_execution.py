@@ -9,7 +9,7 @@ class AnalysisRun(Base):
     
     id = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
     document_id = Column(String(36), ForeignKey("documents.id"), nullable=False)
-    analysis_definition_id = Column(String(36), ForeignKey("analysis_definitions.id"), nullable=False)
+    analysis_code = Column(String(100), nullable=False)
     mode = Column(String(20), nullable=False)  # "automatic" or "step_by_step"
     status = Column(String(20), nullable=False)  # "pending", "in_progress", "completed", "failed"
     config = Column(JSON, default=dict)  # Configuration for the analysis run
@@ -30,8 +30,8 @@ class StepExecutionResult(Base):
     
     id = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
     analysis_run_id = Column(String(36), ForeignKey("analysis_runs.id"), nullable=False)
-    step_definition_id = Column(String(36), ForeignKey("step_definitions.id"), nullable=False)
-    algorithm_definition_id = Column(String(36), ForeignKey("algorithm_definitions.id"), nullable=False)
+    step_code = Column(String(100), nullable=False)
+    algorithm_code = Column(String(100), nullable=False)
     status = Column(String(20), nullable=False)  # "pending", "in_progress", "completed", "failed"
     parameters = Column(JSON)  # Parameters used for this execution
     result = Column(JSON)  # The actual result data

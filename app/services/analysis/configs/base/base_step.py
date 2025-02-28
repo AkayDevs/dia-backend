@@ -2,13 +2,18 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, List
 from app.schemas.analysis.configs.steps import StepDefinitionBase
 from app.schemas.analysis.executions import StepExecutionResultInfo
-
+from app.schemas.analysis.executions.analysis_run import AlgorithmSelection
 class BaseStep(ABC):
     """Base class for all step implementations"""
     
     @abstractmethod
     def get_info(self) -> StepDefinitionBase:
         """Get step definition information"""
+        pass
+
+    @abstractmethod
+    def get_default_algorithm(self) -> Optional[AlgorithmSelection]:
+        """Get default algorithm for the step"""
         pass
     
     @abstractmethod

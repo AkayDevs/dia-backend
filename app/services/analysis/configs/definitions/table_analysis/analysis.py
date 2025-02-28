@@ -13,7 +13,7 @@ class TableAnalysis(BaseDefinition):
             name="Table Analysis",
             version="1.0.0",
             description="Detect and extract data from tables in documents",
-            supported_document_types=[DocumentType.PDF, DocumentType.IMAGE],
+            supported_document_types=[DocumentType.PDF, DocumentType.IMAGE, DocumentType.DOCX],
             implementation_path="app.services.analysis.configs.definitions.table_analysis.analysis.TableAnalysis",
             is_active=True
         )
