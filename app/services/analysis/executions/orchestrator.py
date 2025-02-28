@@ -6,7 +6,7 @@ import importlib
 import inspect
 import re
 
-from app.crud import crud_analysis_config, crud_document
+from app.crud import crud_analysis_config, crud_document, crud_analysis_execution
 from app.schemas.analysis.executions import (
     AnalysisRunInfo,
     StepExecutionResultInfo,
@@ -218,7 +218,7 @@ class AnalysisOrchestrator:
         """Execute all steps in an analysis."""
         try:
             # Get analysis run
-            analysis_run = crud_analysis_config.analysis_run.get(db, id=analysis_run_id)
+            analysis_run = crud_analysis_execution.analysis_run.get(db, id=analysis_run_id)
             if not analysis_run:
                 logger.error(f"Analysis run not found: {analysis_run_id}")
                 return
@@ -228,7 +228,7 @@ class AnalysisOrchestrator:
                 status=AnalysisStatus.IN_PROGRESS,
                 started_at=datetime.utcnow()
             )
-            analysis_run = crud_analysis_config.analysis_run.update(
+            analysis_run = crud_analysis_execution.analysis_run.update(
                 db,
                 db_obj=analysis_run,
                 obj_in=analysis_update

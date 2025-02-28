@@ -71,12 +71,27 @@ class CRUDAnalysisRun(CRUDBase[AnalysisRun, AnalysisRunCreate, AnalysisRunUpdate
                     logger.info(f"Skipping disabled or unconfigured step {step_code}")
                     continue
 
+                # Get algorithm from registry if configured
+                algorithm = None
+                if step_config.algorithm:
+                    algorithm = next(
+                        (algo for algo in AnalysisRegistry.list_algorithms(step_code)
+                         if algo.code == step_config.algorithm.code
+                         and algo.version == step_config.algorithm.version),
+                        None
+                    )
+                    if not algorithm:
+                        logger.warning(f"Algorithm {step_config.algorithm.code} not found in registry")
+                        continue
+
                 # Create step result
                 step_result = StepExecutionResult(
                     id=str(uuid4()),
                     analysis_run_id=db_obj.id,
+                    step_definition_id=step.id,  # Keep for database relations
+                    algorithm_definition_id=algorithm.id if algorithm else None,  # Keep for database relations
                     step_code=step_code,
-                    algorithm_code=step_config.algorithm.code if step_config.algorithm else None,
+                    algorithm_code=algorithm.code if algorithm else None,
                     parameters=step_config.algorithm.parameters if step_config.algorithm else {},
                     status=AnalysisStatus.PENDING,
                     timeout=step_config.timeout,

@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
 from app.core.logging_config import setup_logging, RequestLogContext
 from app.api.v1.routes import auth, health, documents, users, analysis
-from app.admin import setup_admin
+# from app.admin import setup_admin
 from app.db.session import engine, SessionLocal
 from app.db.init_db import init_db
 from app.db.utils import ensure_admin_exists
@@ -78,7 +78,7 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Initialize admin interface
-admin = setup_admin(app, engine)
+# admin = setup_admin(app, engine)
 
 # Create upload directory if it doesn't exist
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)

@@ -19,7 +19,6 @@ class AnalysisDefinition(Base):
     
     # Relationships
     steps = relationship("StepDefinition", back_populates="analysis_definition", cascade="all, delete-orphan")
-    analysis_runs = relationship("AnalysisRun", back_populates="analysis_definition")
     
     __table_args__ = (
         # Ensure unique combination of code and version
@@ -47,7 +46,6 @@ class StepDefinition(Base):
     # Relationships
     analysis_definition = relationship("AnalysisDefinition", back_populates="steps")
     algorithms = relationship("AlgorithmDefinition", back_populates="step", cascade="all, delete-orphan")
-    step_results = relationship("StepExecutionResult", back_populates="step_definition")
     
     __table_args__ = (
         # Ensure unique combination of code and version within an analysis type
@@ -73,7 +71,6 @@ class AlgorithmDefinition(Base):
     
     # Relationships
     step = relationship("StepDefinition", back_populates="algorithms")
-    step_results = relationship("StepExecutionResult", back_populates="algorithm_definition")
     
     __table_args__ = (
         # Ensure unique combination of code and version within a step
