@@ -29,9 +29,9 @@ class TableDataStep(BaseStep):
     
     def get_default_algorithm(self) -> Optional[AlgorithmSelection]:
         return AlgorithmSelection(
-            algorithm_code="table_data",
-            algorithm_version="1.0.0",
-            parameters={}
+            code="table_data",
+            version="1.0.0",
+            parameters=[]
         )
     
     async def validate_requirements(self) -> None:

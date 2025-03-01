@@ -48,140 +48,196 @@ def init_analysis_db(db: Session) -> None:
         
         # Initialize each registered analysis definition
         for definition in AnalysisRegistry.list_analysis_definitions():
-            # Create or update analysis definition
-            db_definition = crud_analysis_config.analysis_definition.get_by_code_and_version(
-                db, 
-                code=definition.code,
-                version=definition.version
-            )
-            
-            if not db_definition:
-                logger.info(f"Creating analysis definition: {definition.name} v{definition.version}")
-                db_definition = crud_analysis_config.analysis_definition.create(
-                    db,
-                    obj_in=AnalysisDefinitionCreate(
-                        code=definition.code,
-                        name=definition.name,
-                        version=definition.version,
-                        description=definition.description,
-                        supported_document_types=definition.supported_document_types,
-                        implementation_path=definition.implementation_path,
-                        is_active=True
-                    )
-                )
-            else:
-                logger.info(f"Updating analysis definition: {definition.name} v{definition.version}")
-                crud_analysis_config.analysis_definition.update(
-                    db,
-                    db_obj=db_definition,
-                    obj_in=AnalysisDefinitionUpdate(
-                        name=definition.name,
-                        description=definition.description,
-                        supported_document_types=definition.supported_document_types,
-                        implementation_path=definition.implementation_path,
-                        is_active=True
-                    )
-                )
-            
-            # Create or update steps
-            for step in AnalysisRegistry.list_steps(definition.code):
-                db_step = crud_analysis_config.step_definition.get_by_code_and_version(
-                    db,
-                    code=step.code,
-                    version=step.version,
-                    analysis_definition_id=str(db_definition.id)
+            try:
+                # Create or update analysis definition
+                db_definition = crud_analysis_config.analysis_definition.get_by_code_and_version(
+                    db, 
+                    code=definition.code,
+                    version=definition.version
                 )
                 
-                if not db_step:
-                    logger.info(f"Creating step: {step.name} v{step.version}")
-                    # Validate result schema path
-                    if not crud_analysis_config.step_definition.validate_result_schema(step.result_schema_path):
-                        logger.warning(f"Invalid result schema path: {step.result_schema_path}")
-                        continue
-                        
-                    db_step = crud_analysis_config.step_definition.create(
+                if not db_definition:
+                    logger.info(f"Creating analysis definition: {definition.name} v{definition.version}")
+                    db_definition = crud_analysis_config.analysis_definition.create(
                         db,
-                        obj_in=StepDefinitionCreate(
-                            code=step.code,
-                            name=step.name,
-                            version=step.version,
-                            description=step.description,
-                            order=step.order,
-                            analysis_definition_id=str(db_definition.id),
-                            base_parameters=step.base_parameters,
-                            result_schema_path=step.result_schema_path,
-                            implementation_path=step.implementation_path,
+                        obj_in=AnalysisDefinitionCreate(
+                            code=definition.code,
+                            name=definition.name,
+                            version=definition.version,
+                            description=definition.description,
+                            supported_document_types=definition.supported_document_types,
+                            implementation_path=definition.implementation_path,
                             is_active=True
                         )
                     )
                 else:
-                    logger.info(f"Updating step: {step.name} v{step.version}")
-                    # Validate result schema path
-                    if not crud_analysis_config.step_definition.validate_result_schema(step.result_schema_path):
-                        logger.warning(f"Invalid result schema path: {step.result_schema_path}")
-                        continue
-                        
-                    crud_analysis_config.step_definition.update(
+                    logger.info(f"Updating analysis definition: {definition.name} v{definition.version}")
+                    crud_analysis_config.analysis_definition.update(
                         db,
-                        db_obj=db_step,
-                        obj_in=StepDefinitionUpdate(
-                            name=step.name,
-                            description=step.description,
-                            order=step.order,
-                            base_parameters=step.base_parameters,
-                            result_schema_path=step.result_schema_path,
-                            implementation_path=step.implementation_path,
+                        db_obj=db_definition,
+                        obj_in=AnalysisDefinitionUpdate(
+                            name=definition.name,
+                            description=definition.description,
+                            supported_document_types=definition.supported_document_types,
+                            implementation_path=definition.implementation_path,
                             is_active=True
                         )
                     )
                 
-                # Create or update algorithms
-                step_code = f"{definition.code}.{step.code}"
-                for algo in AnalysisRegistry.list_algorithms(step_code):
-                    db_algo = crud_analysis_config.algorithm_definition.get_by_code_and_version(
-                        db,
-                        code=algo.code,
-                        version=algo.version,
-                        step_id=str(db_step.id)
-                    )
-                    
-                    if not db_algo:
-                        logger.info(f"Creating algorithm: {algo.name} v{algo.version}")
-                        crud_analysis_config.algorithm_definition.create(
+                # Create or update steps
+                for step in AnalysisRegistry.list_steps(definition.code):
+                    try:
+                        db_step = crud_analysis_config.step_definition.get_by_code_and_version(
                             db,
-                            obj_in=AlgorithmDefinitionCreate(
-                                code=algo.code,
-                                name=algo.name,
-                                version=algo.version,
-                                description=algo.description,
-                                step_id=str(db_step.id),
-                                supported_document_types=algo.supported_document_types,
-                                parameters=algo.parameters,
-                                implementation_path=algo.implementation_path,
-                                is_active=True
-                            )
+                            code=step.code,
+                            version=step.version,
+                            analysis_definition_id=str(db_definition.id)
                         )
-                    else:
-                        logger.info(f"Updating algorithm: {algo.name} v{algo.version}")
-                        crud_analysis_config.algorithm_definition.update(
-                            db,
-                            db_obj=db_algo,
-                            obj_in=AlgorithmDefinitionUpdate(
-                                name=algo.name,
-                                description=algo.description,
-                                supported_document_types=algo.supported_document_types,
-                                parameters=algo.parameters,
-                                implementation_path=algo.implementation_path,
-                                is_active=True
-                            )
-                        )
+                        
+                        if not db_step:
+                            logger.info(f"Creating step: {step.name} v{step.version}")
+                            # Validate result schema path
+                            if not crud_analysis_config.step_definition.validate_result_schema(step.result_schema_path):
+                                logger.warning(f"Invalid result schema path: {step.result_schema_path}")
+                                continue
+                            
+                            try:
+                                db_step = crud_analysis_config.step_definition.create(
+                                    db,
+                                    obj_in=StepDefinitionCreate(
+                                        code=step.code,
+                                        name=step.name,
+                                        version=step.version,
+                                        description=step.description,
+                                        order=step.order,
+                                        analysis_definition_id=str(db_definition.id),
+                                        base_parameters=step.base_parameters,
+                                        result_schema_path=step.result_schema_path,
+                                        implementation_path=step.implementation_path,
+                                        is_active=True
+                                    )
+                                )
+                            except Exception as e:
+                                db.rollback()  # Rollback on any error
+                                if "UNIQUE constraint failed" in str(e):
+                                    logger.warning(f"Step already exists: {step.name} v{step.version} for analysis {definition.name}")
+                                    # Get the existing step and update it
+                                    db_step = crud_analysis_config.step_definition.get_by_code_and_version(
+                                        db,
+                                        code=step.code,
+                                        version=step.version,
+                                        analysis_definition_id=str(db_definition.id)
+                                    )
+                                    if db_step:
+                                        crud_analysis_config.step_definition.update(
+                                            db,
+                                            db_obj=db_step,
+                                            obj_in=StepDefinitionUpdate(
+                                                name=step.name,
+                                                description=step.description,
+                                                order=step.order,
+                                                base_parameters=step.base_parameters,
+                                                result_schema_path=step.result_schema_path,
+                                                implementation_path=step.implementation_path,
+                                                is_active=True
+                                            )
+                                        )
+                                else:
+                                    raise
+                        
+                        # Create or update algorithms
+                        step_code = f"{definition.code}.{step.code}"
+                        for algo in AnalysisRegistry.list_algorithms(step_code):
+                            try:
+                                db_algo = crud_analysis_config.algorithm_definition.get_by_code_and_version(
+                                    db,
+                                    code=algo.code,
+                                    version=algo.version,
+                                    step_id=str(db_step.id)
+                                )
+                                
+                                if not db_algo:
+                                    logger.info(f"Creating algorithm: {algo.name} v{algo.version}")
+                                    try:
+                                        crud_analysis_config.algorithm_definition.create(
+                                            db,
+                                            obj_in=AlgorithmDefinitionCreate(
+                                                code=algo.code,
+                                                name=algo.name,
+                                                version=algo.version,
+                                                description=algo.description,
+                                                step_id=str(db_step.id),
+                                                supported_document_types=algo.supported_document_types,
+                                                parameters=algo.parameters,
+                                                implementation_path=algo.implementation_path,
+                                                is_active=True
+                                            )
+                                        )
+                                    except Exception as e:
+                                        db.rollback()  # Rollback on any error
+                                        if "UNIQUE constraint failed" in str(e):
+                                            logger.warning(f"Algorithm already exists: {algo.name} v{algo.version} for step {step.name}")
+                                            # Get the existing algorithm and update it
+                                            db_algo = crud_analysis_config.algorithm_definition.get_by_code_and_version(
+                                                db,
+                                                code=algo.code,
+                                                version=algo.version,
+                                                step_id=str(db_step.id)
+                                            )
+                                            if db_algo:
+                                                crud_analysis_config.algorithm_definition.update(
+                                                    db,
+                                                    db_obj=db_algo,
+                                                    obj_in=AlgorithmDefinitionUpdate(
+                                                        name=algo.name,
+                                                        description=algo.description,
+                                                        supported_document_types=algo.supported_document_types,
+                                                        parameters=algo.parameters,
+                                                        implementation_path=algo.implementation_path,
+                                                        is_active=True
+                                                    )
+                                                )
+                                        else:
+                                            raise
+                                else:
+                                    logger.info(f"Updating algorithm: {algo.name} v{algo.version}")
+                                    crud_analysis_config.algorithm_definition.update(
+                                        db,
+                                        db_obj=db_algo,
+                                        obj_in=AlgorithmDefinitionUpdate(
+                                            name=algo.name,
+                                            description=algo.description,
+                                            supported_document_types=algo.supported_document_types,
+                                            parameters=algo.parameters,
+                                            implementation_path=algo.implementation_path,
+                                            is_active=True
+                                        )
+                                    )
+                            except Exception as e:
+                                db.rollback()
+                                logger.error(f"Error processing algorithm {algo.name}: {str(e)}")
+                                raise
+                    except Exception as e:
+                        db.rollback()
+                        logger.error(f"Error processing step {step.name}: {str(e)}")
+                        raise
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Error processing analysis definition {definition.name}: {str(e)}")
+                raise
         
         # Deactivate any components not in registry
-        deactivate_unused_components(db)
+        try:
+            deactivate_unused_components(db)
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error deactivating unused components: {str(e)}")
+            raise
         
         logger.info("Analysis database initialization completed successfully")
     
     except Exception as e:
+        db.rollback()
         logger.error(f"Error initializing analysis database: {str(e)}")
         raise
 

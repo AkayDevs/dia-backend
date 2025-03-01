@@ -71,7 +71,7 @@ async def list_step_algorithms(
 @router.post("/documents/{document_id}/analyze", response_model=AnalysisRunInfo)
 async def start_analysis(
     document_id: str,
-    analysis_definition_id: str,
+    analysis_code: str,
     mode: AnalysisMode = AnalysisMode.AUTOMATIC,
     config: Optional[AnalysisRunConfig] = None,
     background_tasks: BackgroundTasks = None,
@@ -83,7 +83,7 @@ async def start_analysis(
     
     Args:
         document_id: ID of the document to analyze
-        analysis_definition_id: ID of the analysis definition to use
+        analysis_code: Code of the analysis definition to use
         mode: Analysis execution mode (automatic or step_by_step)
         config: Optional configuration for the analysis run including:
             - steps: Configuration for each step (algorithms, parameters, etc.)
@@ -104,7 +104,7 @@ async def start_analysis(
         )
 
     # Verify analysis definition exists and is active
-    definition = AnalysisRegistry.get_analysis_definition(analysis_definition_id)
+    definition = AnalysisRegistry.get_analysis_definition(analysis_code)
     if not definition or not definition.is_active:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

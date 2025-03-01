@@ -29,9 +29,9 @@ class TableDetectionStep(BaseStep):
     
     def get_default_algorithm(self) -> Optional[AlgorithmSelection]:
         return AlgorithmSelection(
-            algorithm_code="table_detection",
-            algorithm_version="1.0.0",
-            parameters={}
+            code="table_detection",
+            version="1.0.0",
+            parameters=[]
         )
     
     async def validate_requirements(self) -> None:

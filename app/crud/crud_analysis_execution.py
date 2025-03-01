@@ -88,13 +88,10 @@ class CRUDAnalysisRun(CRUDBase[AnalysisRun, AnalysisRunCreate, AnalysisRunUpdate
                 step_result = StepExecutionResult(
                     id=str(uuid4()),
                     analysis_run_id=db_obj.id,
-                    step_definition_id=step.id,  # Keep for database relations
-                    algorithm_definition_id=algorithm.id if algorithm else None,  # Keep for database relations
                     step_code=step_code,
                     algorithm_code=algorithm.code if algorithm else None,
                     parameters=step_config.algorithm.parameters if step_config.algorithm else {},
                     status=AnalysisStatus.PENDING,
-                    timeout=step_config.timeout,
                     retry_count=step_config.retry
                 )
                 db.add(step_result)

@@ -39,8 +39,8 @@ class NotificationConfig(BaseModel):
         default=True,
         description="Whether to send notification on failure"
     )
-    websocket_channel: str = Field(
-        ...,
+    websocket_channel: Optional[str] = Field(
+        default=None,
         description="WebSocket channel ID for real-time notifications"
     )
 
