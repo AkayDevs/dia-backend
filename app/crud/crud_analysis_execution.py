@@ -84,13 +84,21 @@ class CRUDAnalysisRun(CRUDBase[AnalysisRun, AnalysisRunCreate, AnalysisRunUpdate
                         logger.warning(f"Algorithm {step_config.algorithm.code} not found in registry")
                         continue
 
+                # Convert parameters to dict if they exist
+                parameters = {}
+                if step_config.algorithm and step_config.algorithm.parameters:
+                    parameters = {
+                        param.name: param.value 
+                        for param in step_config.algorithm.parameters
+                    }
+
                 # Create step result
                 step_result = StepExecutionResult(
                     id=str(uuid4()),
                     analysis_run_id=db_obj.id,
                     step_code=step_code,
                     algorithm_code=algorithm.code if algorithm else None,
-                    parameters=step_config.algorithm.parameters if step_config.algorithm else {},
+                    parameters=parameters,
                     status=AnalysisStatus.PENDING,
                     retry_count=step_config.retry
                 )

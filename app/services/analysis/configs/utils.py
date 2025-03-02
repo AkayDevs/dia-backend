@@ -108,8 +108,8 @@ def prepare_steps_config(
                 # Get default algorithm from registry
                 default_algorithm = next(
                     (algo for algo in AnalysisRegistry.list_algorithms(step_code)
-                     if algo.code == default_algo.algorithm_code
-                     and algo.version == default_algo.algorithm_version),
+                     if algo.code == default_algo.code
+                     and algo.version == default_algo.version),
                     None
                 )
                 
@@ -121,8 +121,8 @@ def prepare_steps_config(
                     
                     
                     default_algorithm_selection = AlgorithmSelection(
-                        algorithm_code=default_algorithm.code,
-                        algorithm_version=default_algorithm.version,
+                        code=default_algorithm.code,
+                        version=default_algorithm.version,
                         parameters=default_parameters
                     )
             else:
@@ -156,8 +156,8 @@ def prepare_steps_config(
                         }
                         
                         algorithm_selection = AlgorithmSelection(
-                            algorithm_code=algorithm.code,
-                            algorithm_version=algorithm.version,
+                            code=algorithm.code,
+                            version=algorithm.version,
                             parameters=merged_parameters
                         )
                     else:

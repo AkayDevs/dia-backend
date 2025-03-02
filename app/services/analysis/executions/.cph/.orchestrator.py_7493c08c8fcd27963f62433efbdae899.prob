@@ -1,0 +1,1 @@
+{"name":"Local: orchestrator","url":"/Users/akay/Documents/DIA/dia-backend/app/services/analysis/executions/orchestrator.py","tests":[{"id":1740904849999,"input":"","output":""}],"interactive":false,"memoryLimit":1024,"timeLimit":3000,"srcPath":"/Users/akay/Documents/DIA/dia-backend/app/services/analysis/executions/orchestrator.py","group":"local","local":true}

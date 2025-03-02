@@ -29,7 +29,7 @@ class TableDetectionStep(BaseStep):
     
     def get_default_algorithm(self) -> Optional[AlgorithmSelection]:
         return AlgorithmSelection(
-            code="table_detection",
+            code="msa_detection",
             version="1.0.0",
             parameters=[]
         )

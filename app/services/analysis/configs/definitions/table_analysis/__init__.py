@@ -5,7 +5,7 @@ from .analysis import TableAnalysis
 from .steps.table_detection import TableDetectionStep
 from .steps.table_structure import TableStructureStep
 from .steps.table_data import TableDataStep
-from .algorithms.basic_detection import BasicTableDetectionAlgorithm
+# from .algorithms.basic_detection import BasicTableDetectionAlgorithm
 from .algorithms.msa_detection import MSATableDetectionAlgorithm
 from .algorithms.cv_structure import CVTableStructureAlgorithm
 from .algorithms.ocr_data import OCRTableDataAlgorithm
@@ -26,16 +26,16 @@ def register_components():
     AnalysisRegistry.register_step(table_data_step.get_info(), analysis_info.code)
 
     # Register algorithms
-    basic_detection_algo = BasicTableDetectionAlgorithm()
+    # basic_detection_algo = BasicTableDetectionAlgorithm()
     msa_detection_algo = MSATableDetectionAlgorithm()
     cv_structure_algo = CVTableStructureAlgorithm()
     ocr_data_algo = OCRTableDataAlgorithm()
     
     # Register detection algorithms
-    AnalysisRegistry.register_algorithm(
-        basic_detection_algo.get_info(),
-        f"{analysis_info.code}.{table_detection_step.get_info().code}"
-    )
+    # AnalysisRegistry.register_algorithm(
+    #     basic_detection_algo.get_info(),
+    #     f"{analysis_info.code}.{table_detection_step.get_info().code}"
+    # )
     AnalysisRegistry.register_algorithm(
         msa_detection_algo.get_info(),
         f"{analysis_info.code}.{table_detection_step.get_info().code}"

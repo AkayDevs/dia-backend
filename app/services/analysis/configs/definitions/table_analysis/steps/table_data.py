@@ -29,7 +29,7 @@ class TableDataStep(BaseStep):
     
     def get_default_algorithm(self) -> Optional[AlgorithmSelection]:
         return AlgorithmSelection(
-            code="table_data",
+            code="ocr_data",
             version="1.0.0",
             parameters=[]
         )

@@ -1,8 +1,8 @@
-from typing import Dict, Any
+from typing import Dict, Any, List
 import cv2
 import numpy as np
 from app.services.analysis.configs.base import BaseAlgorithm
-from app.schemas.analysis.configs.algorithms import AlgorithmDefinitionBase, AlgorithmParameter
+from app.schemas.analysis.configs.algorithms import AlgorithmDefinitionBase, AlgorithmParameter, AlgorithmParameterValue
 from app.enums.document import DocumentType
 from app.schemas.analysis.results.table_detection import TableDetectionResult
 
@@ -43,6 +43,20 @@ class BasicTableDetectionAlgorithm(BaseAlgorithm):
             implementation_path="app.services.analysis.configs.definitions.table_analysis.algorithms.basic_detection.BasicTableDetectionAlgorithm",
             is_active=True
         )
+    
+    def get_default_parameters(self) -> List[AlgorithmParameterValue]:
+        """Get default parameters for the algorithm"""
+        return [
+            AlgorithmParameterValue(
+                name="max_tables",
+                value=10000
+            ),
+            AlgorithmParameterValue(
+                name="min_table_size",
+                value=0.05
+            )
+        ]
+    
     
     async def validate_requirements(self) -> None:
         """Validate that all required dependencies are available"""
