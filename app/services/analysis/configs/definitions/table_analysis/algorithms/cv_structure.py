@@ -23,7 +23,7 @@ class CVTableStructureAlgorithm(BaseAlgorithm):
             name="OpenCV Table Structure Detection",
             version="1.0.0",
             description="Advanced table structure detection using OpenCV and image processing",
-            supported_document_types=[DocumentType.PDF, DocumentType.IMAGE],
+            supported_document_types=[DocumentType.PDF, DocumentType.IMAGE, DocumentType.DOCX],
             parameters=[
                 AlgorithmParameter(
                     name="min_line_length",
@@ -339,21 +339,56 @@ class CVTableStructureAlgorithm(BaseAlgorithm):
             header_rows = parameters.get("header_row_count", 1)
             detect_merged = parameters.get("detect_merged_cells", True)
             
-            # Load image
-            image = cv2.imread(document_path)
-            if image is None:
-                raise ValueError(f"Could not read image from {document_path}")
+            # Extract document pages using document service
+            from app.services.documents.document import extract_document_pages
+            from app.enums.document import DocumentType
+
+            # Determine document type from file extension
+            if document_path.lower().endswith('.pdf'):
+                doc_type = DocumentType.PDF
+            elif document_path.lower().endswith(('.jpg', '.jpeg', '.png')):
+                doc_type = DocumentType.IMAGE
+            elif document_path.lower().endswith(('.docx', '.doc')):
+                doc_type = DocumentType.DOCX
+            else:
+                raise ValueError(f"Unsupported document type: {document_path}")
+
+            # Extract user_id and document_id from path
+            path_parts = document_path.split('/')
+            if len(path_parts) < 3:
+                raise ValueError(f"Invalid document path format: {document_path}")
+            user_id = path_parts[0]
+            document_id = path_parts[1]
+
+            # Get document pages
+            document_pages = await extract_document_pages(
+                document_path=f"/uploads/{document_path}",
+                document_type=doc_type,
+                user_id=user_id,
+                document_id=document_id
+            )
             
             # Get table detection results
-            table_results = previous_results.get("table_detection", {})
+            table_results = previous_results.get("table_analysis.table_detection", {})
             if not table_results:
-                raise ValueError("No table detection results found")
+                raise ValueError("No table detection results found in previous steps")
             
             # Process each page
             final_results = []
             total_tables = 0
             
-            for page_result in table_results.get("results", []):
+            for page_idx, page_result in enumerate(table_results.get("results", [])):
+                # Get corresponding document page
+                doc_page = next((p for p in document_pages.pages if p.page_number == page_idx + 1), None)
+                if not doc_page:
+                    continue
+
+                # Load image from the page's image_url
+                image_path = doc_page.image_url.lstrip('/')
+                image = cv2.imread(image_path)
+                if image is None:
+                    raise ValueError(f"Could not read image from {image_path}")
+
                 page_tables = []
                 page_info = page_result["page_info"]
                 
