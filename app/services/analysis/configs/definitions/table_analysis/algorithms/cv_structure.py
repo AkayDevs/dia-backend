@@ -121,47 +121,56 @@ class CVTableStructureAlgorithm(BaseAlgorithm):
         else:
             gray = image
 
+        # Enhance contrast using CLAHE
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        gray = clahe.apply(gray)
+
         # Apply adaptive thresholding
         binary = cv2.adaptiveThreshold(
             gray, 255,
             cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
             cv2.THRESH_BINARY_INV,
-            15,  # Block size
-            3    # C constant
+            15,  # Smaller block size to catch finer details
+            2    # Smaller C value to be more sensitive
         )
 
-        # Remove noise
+        # Remove small noise while preserving lines
         kernel = np.ones((2,2), np.uint8)
-        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
         binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
 
         # Calculate kernel sizes based on image dimensions
-        h_kernel_length = max(int(image.shape[1] * min_length), 20)
+        h_kernel_length = max(int(image.shape[1] * min_length), 20)  # Reduced minimum length
         v_kernel_length = max(int(image.shape[0] * min_length), 20)
 
         # Detect horizontal lines
         h_kernel = cv2.getStructuringElement(
             cv2.MORPH_RECT,
-            (h_kernel_length, max(int(image.shape[0] * 0.001), 1))
+            (h_kernel_length, 1)
         )
         horizontal = cv2.morphologyEx(binary, cv2.MORPH_OPEN, h_kernel)
-        horizontal = cv2.dilate(
-            horizontal,
-            cv2.getStructuringElement(cv2.MORPH_RECT, (3, 1)),
-            iterations=1
-        )
+        
+        # Strengthen and connect horizontal lines
+        h_dilate_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (10, 1))
+        horizontal = cv2.dilate(horizontal, h_dilate_kernel, iterations=2)
+        
+        # Additional closing to connect broken horizontal lines
+        h_close_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (20, 1))
+        horizontal = cv2.morphologyEx(horizontal, cv2.MORPH_CLOSE, h_close_kernel)
 
         # Detect vertical lines
         v_kernel = cv2.getStructuringElement(
             cv2.MORPH_RECT,
-            (max(int(image.shape[1] * 0.001), 1), v_kernel_length)
+            (1, v_kernel_length)
         )
         vertical = cv2.morphologyEx(binary, cv2.MORPH_OPEN, v_kernel)
-        vertical = cv2.dilate(
-            vertical,
-            cv2.getStructuringElement(cv2.MORPH_RECT, (1, 3)),
-            iterations=1
-        )
+        
+        # Strengthen and connect vertical lines
+        v_dilate_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 10))
+        vertical = cv2.dilate(vertical, v_dilate_kernel, iterations=2)
+        
+        # Additional closing to connect broken vertical lines
+        v_close_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 20))
+        vertical = cv2.morphologyEx(vertical, cv2.MORPH_CLOSE, v_close_kernel)
 
         return horizontal, vertical
 

@@ -36,7 +36,7 @@ class TableStructureStep(BaseStep):
     
     def get_default_algorithm(self) -> Optional[AlgorithmSelection]:
         return AlgorithmSelection(
-            code="cv_structure",
+            code="msa_structure",
             version="1.0.0",
             parameters=[]
         )
