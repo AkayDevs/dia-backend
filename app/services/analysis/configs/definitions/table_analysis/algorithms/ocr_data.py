@@ -244,7 +244,7 @@ class OCRTableDataAlgorithm(BaseAlgorithm):
             data_type, normalized_value = self._detect_data_type(text)
         
         return CellContent(
-            text=text,
+            text=text if text else "",  # Ensure text is never None
             confidence=Confidence(
                 score=float(avg_conf),
                 method="tesseract_ocr"
@@ -305,32 +305,52 @@ class OCRTableDataAlgorithm(BaseAlgorithm):
             final_results = []
             total_tables = 0
             
-            for page_idx, page_result in enumerate(structure_results.get("results", [])):
-                # Get corresponding document page
-                doc_page = next((p for p in document_pages.pages if p.page_number == page_idx + 1), None)
+            for page_result in structure_results.get("results", []):
+                # Get page info
+                page_info = page_result["page_info"]
+                page_tables = []
+                
+                # Get corresponding document page and load image
+                doc_page = next((p for p in document_pages.pages if p.page_number == page_info["page_number"]), None)
                 if not doc_page:
                     continue
-
+                
                 # Load image from the page's image_url
                 image_path = doc_page.image_url.lstrip('/')
                 image = cv2.imread(image_path)
                 if image is None:
                     raise ValueError(f"Could not read image from {image_path}")
-
-                page_tables = []
-                page_info = page_result["page_info"]
                 
+                # Process each table
                 for table_structure in page_result["tables"]:
-                    # Initialize 2D array for table data
-                    num_rows = table_structure["num_rows"]
-                    num_cols = table_structure["num_cols"]
-                    table_data = [[None for _ in range(num_cols)] for _ in range(num_rows)]
+                    # Initialize 2D array for table data with empty CellContent objects
+                    table_data = [
+                        [CellContent(
+                            text="",
+                            confidence=Confidence(score=0.0, method="empty"),
+                            data_type=None,
+                            normalized_value=None
+                        ) for _ in range(table_structure["num_cols"])]
+                        for _ in range(table_structure["num_rows"])
+                    ]
+                    
+                    # Sort cells by position for grid assignment
+                    sorted_cells = sorted(
+                        table_structure["cells"],
+                        key=lambda c: (c["bbox"]["y1"], c["bbox"]["x1"])
+                    )
+                    
+                    # Create cell position mapping
+                    cell_positions = {}
+                    for idx, cell in enumerate(sorted_cells):
+                        row_idx = idx // table_structure["num_cols"]
+                        col_idx = idx % table_structure["num_cols"]
+                        cell_positions[id(cell)] = (row_idx, col_idx)
                     
                     # Process each cell
                     for cell in table_structure["cells"]:
-                        # Get cell position from bbox
-                        row_idx = cell["row"]
-                        col_idx = cell["col"]
+                        # Get cell position
+                        row_idx, col_idx = cell_positions[id(cell)]
                         
                         # Extract cell content
                         content = self._extract_cell_content(
@@ -342,13 +362,12 @@ class OCRTableDataAlgorithm(BaseAlgorithm):
                             preprocess_method
                         )
                         
-                        # Handle merged cells
+                        # Fill cell and its spans
                         row_span = cell.get("row_span", 1)
                         col_span = cell.get("col_span", 1)
                         
-                        # Fill all spanned cells with the same content
-                        for r in range(row_idx, row_idx + row_span):
-                            for c in range(col_idx, col_idx + col_span):
+                        for r in range(row_idx, min(row_idx + row_span, table_structure["num_rows"])):
+                            for c in range(col_idx, min(col_idx + col_span, table_structure["num_cols"])):
                                 table_data[r][c] = content
                     
                     # Create table data object

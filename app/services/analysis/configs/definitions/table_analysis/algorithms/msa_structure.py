@@ -139,7 +139,8 @@ class MSATableStructureAlgorithm(BaseAlgorithm):
         self,
         outputs: Dict[str, torch.Tensor],
         confidence_threshold: float,
-        image_size: Tuple[int, int]
+        image_size: Tuple[int, int],
+        table_bbox: Dict[str, int]
     ) -> Tuple[List[Cell], int, int]:
         """Process model predictions to create cell objects"""
         height, width = image_size
@@ -187,13 +188,19 @@ class MSATableStructureAlgorithm(BaseAlgorithm):
             label_name = id2label[label.item()].lower()
             logger.debug(f"Processing {label_name} with confidence {score:.3f}")
             
+            # Adjust coordinates to be relative to the page
+            x1 = int(box[0]) + table_bbox["x1"]
+            y1 = int(box[1]) + table_bbox["y1"]
+            x2 = int(box[2]) + table_bbox["x1"]
+            y2 = int(box[3]) + table_bbox["y1"]
+            
             # Create cell object
             cell = Cell(
                 bbox=BoundingBox(
-                    x1=int(box[0]),
-                    y1=int(box[1]),
-                    x2=int(box[2]),
-                    y2=int(box[3])
+                    x1=x1,
+                    y1=y1,
+                    x2=x2,
+                    y2=y2
                 ),
                 row_span=2 if 'spanning' in label_name else 1,
                 col_span=2 if 'spanning' in label_name else 1,
@@ -205,7 +212,7 @@ class MSATableStructureAlgorithm(BaseAlgorithm):
             )
             cells.append(cell)
             
-            logger.debug(f"Added cell: {label_name}, bbox={box}, is_header={'header' in label_name}")
+            logger.debug(f"Added cell: {label_name}, bbox=({x1},{y1},{x2},{y2}), is_header={'header' in label_name}")
         
         return cells, max_row, max_col
 
@@ -298,11 +305,12 @@ class MSATableStructureAlgorithm(BaseAlgorithm):
                     with torch.no_grad():
                         outputs = self._model(**encoding)
 
-                    # Process predictions
+                    # Process predictions with table bbox for coordinate adjustment
                     cells, num_rows, num_cols = self._process_cell_predictions(
                         outputs,
                         confidence_threshold,
-                        table_img.size[::-1]  # Convert (width, height) to (height, width)
+                        table_img.size[::-1],  # Convert (width, height) to (height, width)
+                        bbox  # Pass table bbox for coordinate adjustment
                     )
                     
                     # Create table structure
