@@ -347,7 +347,7 @@ async def update_step_corrections(
 @router.get("/user/analyses", response_model=List[AnalysisRunWithResults])
 async def list_user_analyses(
     status: Optional[AnalysisStatus] = Query(None, description="Filter by analysis status"),
-    analysis_definition_id: Optional[str] = Query(None, description="Filter by analysis definition"),
+    analysis_code: Optional[str] = Query(None, description="Filter by analysis code"),
     document_type: Optional[DocumentType] = Query(None, description="Filter by document type"),
     start_date: Optional[datetime] = Query(None, description="Filter by start date (inclusive)"),
     end_date: Optional[datetime] = Query(None, description="Filter by end date (inclusive)"),
@@ -363,7 +363,7 @@ async def list_user_analyses(
         filters = {
             "user_id": str(current_user.id),
             "status": status,
-            "analysis_definition_id": analysis_definition_id,
+            "analysis_code": analysis_code,
             "document_type": document_type,
             "start_date": start_date,
             "end_date": end_date
@@ -372,12 +372,19 @@ async def list_user_analyses(
         # Remove None values from filters
         filters = {k: v for k, v in filters.items() if v is not None}
         
-        return crud_analysis_config.analysis_run.get_multi_by_filters(
+        # Get analyses using the analysis execution CRUD
+        analyses = crud_analysis_execution.analysis_run.get_multi_by_filters(
             db=db,
             filters=filters,
             skip=skip,
             limit=limit
         )
+        
+        # Convert to AnalysisRunWithResults using from_orm
+        return [
+            AnalysisRunWithResults.from_orm(analysis)
+            for analysis in analyses
+        ]
         
     except Exception as e:
         logger.error(f"Error fetching analyses for user {current_user.id}: {str(e)}")

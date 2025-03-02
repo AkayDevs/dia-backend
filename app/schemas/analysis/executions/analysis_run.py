@@ -169,4 +169,6 @@ class AnalysisRunWithResults(AnalysisRunInfo):
     )
 
     class Config:
-        from_attributes = True 
+        orm_mode = True
+        from_attributes = True
+        arbitrary_types_allowed = True 

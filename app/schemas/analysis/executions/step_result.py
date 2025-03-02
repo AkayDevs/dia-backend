@@ -7,8 +7,8 @@ from app.schemas.analysis.results.base import BaseResultSchema
 class StepExecutionResultBase(BaseModel):
     """Base schema for step execution result data"""
     analysis_run_id: str = Field(..., description="ID of the parent analysis run")
-    step_definition_id: str = Field(..., description="ID of the step definition")
-    algorithm_definition_id: str = Field(..., description="ID of the algorithm definition")
+    step_code: str = Field(..., description="Code of the step")
+    algorithm_code: str = Field(..., description="Code of the algorithm")
     parameters: Dict[str, Any] = Field(default_factory=dict, description="Parameters used for this execution")
 
 class StepExecutionResultCreate(StepExecutionResultBase):
