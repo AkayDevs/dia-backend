@@ -6,13 +6,14 @@ from app.schemas.analysis.results.base import BaseResultSchema
 
 class StepExecutionResultBase(BaseModel):
     """Base schema for step execution result data"""
-    analysis_run_id: str = Field(..., description="ID of the parent analysis run")
     step_code: str = Field(..., description="Code of the step")
     algorithm_code: str = Field(..., description="Code of the algorithm")
-    parameters: Dict[str, Any] = Field(default_factory=dict, description="Parameters used for this execution")
+    status: AnalysisStatus
 
 class StepExecutionResultCreate(StepExecutionResultBase):
     """Schema for creating a new step execution result"""
+    analysis_run_id: str = Field(..., description="ID of the parent analysis run")
+    parameters: Dict[str, Any] = Field(default_factory=dict, description="Parameters used for this execution")
     status: AnalysisStatus = Field(AnalysisStatus.PENDING, description="Initial execution status")
 
 class StepExecutionResultUpdate(BaseModel):
@@ -28,6 +29,7 @@ class StepExecutionResultUpdate(BaseModel):
 class StepExecutionResultInDB(StepExecutionResultBase):
     """Schema for step execution result as stored in database"""
     id: str
+    analysis_run_id: str = Field(..., description="ID of the parent analysis run")
     status: AnalysisStatus
     result: Optional[BaseResultSchema] = Field(
         default=None,
@@ -46,6 +48,14 @@ class StepExecutionResultInDB(StepExecutionResultBase):
     class Config:
         from_attributes = True
 
-class StepExecutionResultInfo(StepExecutionResultInDB):
+class StepExecutionResultInfo(StepExecutionResultBase):
     """Schema for step execution result with basic information"""
-    pass
+    id: str
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    error_message: Optional[str] = None
+    
+    model_config = {
+        "from_attributes": True,
+        "arbitrary_types_allowed": True
+    }

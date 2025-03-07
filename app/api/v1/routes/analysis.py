@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 import logging
 from datetime import datetime
 
+logger = logging.getLogger(__name__)
+
 from app.db import deps
 from app.crud import crud_analysis_config, crud_document, crud_analysis_execution
 from app.schemas.analysis.configs.definitions import (
@@ -28,7 +30,6 @@ from app.enums.analysis import AnalysisMode, AnalysisStatus, AnalysisProcessingT
 from app.services.analysis.configs.utils import prepare_analysis_config
 from app.services.analysis.configs.registry import AnalysisRegistry
 router = APIRouter()
-logger = logging.getLogger(__name__)
 
 @router.get("/definitions", response_model=List[AnalysisDefinitionInfo])
 async def list_analysis_definitions(
@@ -381,14 +382,11 @@ async def list_user_analyses(
         )
         
         # Convert to AnalysisRunWithResults using from_orm
-        return [
-            AnalysisRunWithResults.from_orm(analysis)
-            for analysis in analyses
-        ]
-        
+        # This will automatically handle nested relationships
+        return [AnalysisRunWithResults.from_orm(analysis) for analysis in analyses]
     except Exception as e:
-        logger.error(f"Error fetching analyses for user {current_user.id}: {str(e)}")
+        logger.error(f"Error listing user analyses: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail=f"Error listing analyses: {str(e)}"
         ) 

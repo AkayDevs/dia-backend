@@ -154,21 +154,22 @@ class AnalysisRunInDB(AnalysisRunBase):
     completed_at: Optional[datetime] = None
     error_message: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = {
+        "from_attributes": True
+    }
 
 class AnalysisRunInfo(AnalysisRunInDB):
     """Schema for analysis run with basic information"""
     pass
 
-class AnalysisRunWithResults(AnalysisRunInfo):
+class AnalysisRunWithResults(AnalysisRunInDB):
     """Schema for analysis run with step results"""
     step_results: List[StepExecutionResultInfo] = Field(
         default_factory=list,
         description="Results of individual analysis steps"
     )
 
-    class Config:
-        orm_mode = True
-        from_attributes = True
-        arbitrary_types_allowed = True 
+    model_config = {
+        "from_attributes": True,
+        "arbitrary_types_allowed": True
+    } 
