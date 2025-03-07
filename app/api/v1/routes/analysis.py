@@ -193,7 +193,7 @@ async def get_analysis(
     """
     Get detailed information about a specific analysis.
     """
-    analysis_run = crud_analysis_config.analysis_run.get(db, id=analysis_id)
+    analysis_run = crud_analysis_execution.analysis_run.get(db, id=analysis_id)
     if not analysis_run:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
