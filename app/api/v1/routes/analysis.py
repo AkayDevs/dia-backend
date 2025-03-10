@@ -14,7 +14,7 @@ from app.schemas.analysis.configs.definitions import (
     AnalysisDefinitionWithStepsAndAlgorithms
 )
 from app.schemas.analysis.configs.steps import StepDefinitionWithAlgorithms
-from app.schemas.analysis.configs.algorithms import AlgorithmDefinitionInfo
+from app.schemas.analysis.configs.algorithms import AlgorithmDefinitionWithParameters
 from app.schemas.analysis.executions import (
     AnalysisRunCreate,
     AnalysisRunInfo,
@@ -58,12 +58,12 @@ async def get_analysis_definition(
         )
     return definition
 
-@router.get("/steps/{step_id}/algorithms", response_model=List[AlgorithmDefinitionInfo])
+@router.get("/steps/{step_id}/algorithms", response_model=List[AlgorithmDefinitionWithParameters])
 async def list_step_algorithms(
     step_id: str,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_verified_user),
-) -> List[AlgorithmDefinitionInfo]:
+) -> List[AlgorithmDefinitionWithParameters]:
     """
     List all available algorithms for a specific analysis step.
     """

@@ -71,6 +71,15 @@ class AlgorithmDefinitionInfo(BaseModel):
     class Config:
         from_attributes = True
 
+class AlgorithmDefinitionWithParameters(AlgorithmDefinitionInfo):
+    """Schema for algorithm definition with parameters"""
+    parameters: List[AlgorithmParameter] = Field(
+        ..., description="Algorithm parameters"
+    )
+
+    class Config:
+        from_attributes = True
+
 class AlgorithmSelection(BaseModel):
     """Schema for selecting an algorithm for a step"""
     code: str = Field(..., description="Algorithm code")
