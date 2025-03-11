@@ -61,7 +61,6 @@ class AlgorithmDefinitionInDB(AlgorithmDefinitionBase):
 
 class AlgorithmDefinitionInfo(BaseModel):
     """Schema for basic algorithm definition information"""
-    id: str
     code: str
     name: str
     version: str

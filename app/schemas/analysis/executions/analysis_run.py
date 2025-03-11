@@ -2,7 +2,7 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime
 from pydantic import BaseModel, Field, validator
 from app.enums.analysis import AnalysisStatus, AnalysisMode
-from .step_result import StepExecutionResultInfo
+from .step_result import StepExecutionResultInDB
 from app.schemas.analysis.configs.algorithms import AlgorithmSelection
 
 
@@ -164,7 +164,7 @@ class AnalysisRunInfo(AnalysisRunInDB):
 
 class AnalysisRunWithResults(AnalysisRunInDB):
     """Schema for analysis run with step results"""
-    step_results: List[StepExecutionResultInfo] = Field(
+    step_results: List[StepExecutionResultInDB] = Field(
         default_factory=list,
         description="Results of individual analysis steps"
     )

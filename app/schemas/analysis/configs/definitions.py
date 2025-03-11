@@ -39,21 +39,9 @@ class AnalysisDefinitionInDB(AnalysisDefinitionBase):
     class Config:
         from_attributes = True
 
-class AnalysisDefinitionWithSteps(AnalysisDefinitionInDB):
-    """Schema for analysis definition with its steps"""
-    steps: List[StepDefinitionInfo] = Field(
-        default_factory=list, description="Analysis steps in order"
-    )
-
-class AnalysisDefinitionWithStepsAndAlgorithms(AnalysisDefinitionWithSteps):
-    """Schema for analysis definition with its steps and algorithms"""
-    steps: List[StepDefinitionWithAlgorithms] = Field(
-        default_factory=list, description="Analysis steps with algorithms"
-    )
 
 class AnalysisDefinitionInfo(BaseModel):
     """Schema for basic analysis definition information"""
-    id: str
     code: str
     name: str
     version: str
@@ -63,3 +51,16 @@ class AnalysisDefinitionInfo(BaseModel):
 
     class Config:
         from_attributes = True
+        from_orm = True
+
+class AnalysisDefinitionWithSteps(AnalysisDefinitionInfo):
+    """Schema for analysis definition with its steps"""
+    steps: List[StepDefinitionInfo] = Field(
+        default_factory=list, description="Analysis steps in order"
+    )
+
+class AnalysisDefinitionWithStepsAndAlgorithms(AnalysisDefinitionInfo):
+    """Schema for analysis definition with its steps and algorithms"""
+    steps: List[StepDefinitionWithAlgorithms] = Field(
+        default_factory=list, description="Analysis steps with algorithms"
+    )

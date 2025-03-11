@@ -13,8 +13,13 @@ from app.schemas.analysis.configs.definitions import (
     AnalysisDefinitionWithSteps,
     AnalysisDefinitionWithStepsAndAlgorithms
 )
-from app.schemas.analysis.configs.steps import StepDefinitionWithAlgorithms
-from app.schemas.analysis.configs.algorithms import AlgorithmDefinitionWithParameters
+from app.schemas.analysis.configs.steps import (
+    StepDefinitionWithAlgorithms,
+)
+from app.schemas.analysis.configs.algorithms import (
+    AlgorithmDefinitionInfo,
+    AlgorithmDefinitionWithParameters,
+)
 from app.schemas.analysis.executions import (
     AnalysisRunCreate,
     AnalysisRunInfo,
@@ -32,31 +37,67 @@ from app.services.analysis.configs.registry import AnalysisRegistry
 router = APIRouter()
 
 @router.get("/definitions", response_model=List[AnalysisDefinitionInfo])
-async def list_analysis_definitions(
-    db: Session = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_active_verified_user),
-) -> List[AnalysisDefinitionInfo]:
+async def list_analysis_definitions() -> List[AnalysisDefinitionInfo]:
     """
     List all available analysis definitions.
     """
-    return crud_analysis_config.analysis_definition.get_active_definitions(db)
+    return [AnalysisDefinitionInfo.from_orm(definition) for definition in AnalysisRegistry.list_analysis_definitions()]
 
-@router.get("/definitions/{definition_id}", response_model=AnalysisDefinitionWithStepsAndAlgorithms)
+@router.get("/definitions/{definition_code}", response_model=AnalysisDefinitionWithStepsAndAlgorithms)
 async def get_analysis_definition(
-    definition_id: str,
+    definition_code: str,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_verified_user),
 ) -> AnalysisDefinitionWithStepsAndAlgorithms:
     """
-    Get detailed information about a specific analysis definition.
+    Get detailed information about a specific analysis definition,
+    including its steps and the algorithms available for each step.
     """
-    definition = crud_analysis_config.analysis_definition.get(db, id=definition_id)
+    # Get the analysis definition with steps and algorithms
+    definition = AnalysisRegistry.get_analysis_definition(definition_code)
     if not definition:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Analysis definition not found"
         )
-    return definition
+
+    # Get the step definitions
+    step_definitions = AnalysisRegistry.list_steps(definition_code)
+    if not step_definitions:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No steps found for this analysis definition"
+        )
+
+    steps_with_algorithms = []
+    for step in step_definitions:
+        # Get algorithms for this step
+        algorithms = [AlgorithmDefinitionInfo.from_orm(algorithm) for algorithm in AnalysisRegistry.list_algorithms(f"{definition_code}.{step.code}")]
+        # Create a StepDefinitionWithAlgorithms object
+        step_with_algorithms = StepDefinitionWithAlgorithms(
+            code=step.code,
+            name=step.name,
+            version=step.version,
+            description=step.description,
+            base_parameters=step.base_parameters,
+            order=step.order,
+            is_active=step.is_active,
+            algorithms=algorithms
+        )
+        steps_with_algorithms.append(step_with_algorithms)
+    
+    # Create the complete response object
+    complete_definition = AnalysisDefinitionWithStepsAndAlgorithms(
+        code=definition.code,
+        name=definition.name,
+        version=definition.version,
+        description=definition.description,
+        supported_document_types=definition.supported_document_types,
+        is_active=definition.is_active,
+        steps=steps_with_algorithms
+    )
+    
+    return complete_definition
 
 @router.get("/steps/{step_id}/algorithms", response_model=List[AlgorithmDefinitionWithParameters])
 async def list_step_algorithms(

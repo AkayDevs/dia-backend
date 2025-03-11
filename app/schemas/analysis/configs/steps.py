@@ -45,34 +45,27 @@ class StepDefinitionInDB(StepDefinitionBase):
     class Config:
         from_attributes = True
 
-class StepDefinitionWithAlgorithms(StepDefinitionInDB):
-    """Schema for step definition with its algorithms"""
-    algorithms: List[AlgorithmDefinitionInfo] = Field(
-        default_factory=list, description="Available algorithms for this step"
-    )
 
 class StepDefinitionInfo(BaseModel):
     """Schema for basic step definition information"""
-    id: str
     code: str
     name: str
     version: str
     description: Optional[str] = None
+    base_parameters: List[AlgorithmParameter] = Field(
+        default=[], description="Base parameter definitions for the step"
+    )
     order: int
     is_active: bool
 
     class Config:
         from_attributes = True
 
-class StepParameter(BaseModel):
-    """Schema for step parameter definition"""
-    name: str = Field(..., description="Parameter name")
-    type: str = Field(..., description="Parameter type (e.g., 'string', 'number')")
-    description: Optional[str] = Field(None, description="Parameter description")
-    required: bool = Field(True, description="Whether the parameter is required")
-    default: Optional[Any] = Field(None, description="Default value if any")
-    constraints: Optional[Dict[str, Any]] = Field(
-        None, description="Parameter constraints (e.g., min, max, pattern)"
+
+class StepDefinitionWithAlgorithms(StepDefinitionInfo):
+    """Schema for step definition with its algorithms"""
+    algorithms: List[AlgorithmDefinitionInfo] = Field(
+        default_factory=list, description="Available algorithms for this step"
     )
 
 class AnalysisStepResult(BaseModel):
