@@ -20,7 +20,7 @@ class StepExecutionResultUpdate(BaseModel):
     """Schema for updating a step execution result"""
     status: Optional[AnalysisStatus] = None
     parameters: Optional[Dict[str, Any]] = None
-    result: Optional[BaseResultSchema] = None
+    result: Optional[Dict[str, Any]] = None
     user_corrections: Optional[Dict[str, Any]] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -31,7 +31,7 @@ class StepExecutionResultInDB(StepExecutionResultBase):
     id: str
     analysis_run_id: str = Field(..., description="ID of the parent analysis run")
     status: AnalysisStatus
-    result: Optional[BaseResultSchema] = Field(
+    result: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Validated analysis result following the step's result schema"
     )

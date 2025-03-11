@@ -227,7 +227,8 @@ async def list_document_analyses(
             detail="Not enough permissions"
         )
 
-    return crud_analysis_execution.analysis_run.get_by_document(db, document_id)
+    analysis_runs = crud_analysis_execution.analysis_run.get_by_document(db, document_id)
+    return [AnalysisRunWithResults.from_orm(analysis) for analysis in analysis_runs]
 
 @router.get("/analyses/{analysis_id}", response_model=AnalysisRunWithResults)
 async def get_analysis(
