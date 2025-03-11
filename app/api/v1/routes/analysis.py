@@ -99,16 +99,20 @@ async def get_analysis_definition(
     
     return complete_definition
 
-@router.get("/steps/{step_id}/algorithms", response_model=List[AlgorithmDefinitionWithParameters])
+@router.get("/steps/{step_code}/algorithms", response_model=List[AlgorithmDefinitionWithParameters])
 async def list_step_algorithms(
-    step_id: str,
+    step_code: str,
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_verified_user),
 ) -> List[AlgorithmDefinitionWithParameters]:
     """
     List all available algorithms for a specific analysis step.
+    Uses AnalysisRegistry to retrieve algorithm definitions.
     """
-    return crud_analysis_config.algorithm_definition.get_by_step(db, step_id)
+    # Get algorithms for the step using AnalysisRegistry
+    algorithms = [AlgorithmDefinitionWithParameters.from_orm(algorithm) for algorithm in AnalysisRegistry.list_algorithms(step_code)]
+    
+    return algorithms
 
 @router.post("/documents/{document_id}/analyze", response_model=AnalysisRunInfo)
 async def start_analysis(
