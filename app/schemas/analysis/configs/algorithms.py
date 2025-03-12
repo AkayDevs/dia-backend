@@ -65,6 +65,7 @@ class AlgorithmDefinitionInfo(BaseModel):
     name: str
     version: str
     description: Optional[str] = None
+    supported_document_types: List[DocumentType]
     is_active: bool
 
     class Config:
