@@ -152,13 +152,13 @@ class AnalysisOrchestrator:
                 # Update step result
                 step_result_update = StepExecutionResultUpdate(
                     status=AnalysisStatus.COMPLETED,
-                    result=validated_result,
+                    result=validated_result.dict(),
                     completed_at=datetime.utcnow()
                 )
                 crud_analysis_execution.step_execution_result.update_result(
                     db,
                     db_obj=step_result,
-                    result=validated_result,
+                    result=validated_result.dict(),
                     status=AnalysisStatus.COMPLETED
                 )
                 

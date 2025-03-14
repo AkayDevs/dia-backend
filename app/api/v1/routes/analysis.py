@@ -114,7 +114,7 @@ async def list_step_algorithms(
     
     return algorithms
 
-@router.post("/documents/{document_id}/analyze", response_model=AnalysisRunInfo)
+@router.post("/document/{document_id}", response_model=AnalysisRunInfo)
 async def start_analysis(
     document_id: str,
     analysis_code: str,
