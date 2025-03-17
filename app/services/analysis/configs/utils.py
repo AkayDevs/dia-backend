@@ -129,8 +129,8 @@ def prepare_steps_config(
                 logger.warning(f"No default algorithm found for step {step_code}")
             
             # If user provided config for this step
-            if step_code in user_steps_config:
-                user_step_config = user_steps_config[step_code]
+            if step.code in user_steps_config:
+                user_step_config = user_steps_config[step.code]
                 
                 # Handle algorithm configuration
                 algorithm_selection = None
@@ -150,10 +150,7 @@ def prepare_steps_config(
                         default_algo_params = algo_impl.get_default_parameters()
                         
                         # Merge user parameters with defaults
-                        merged_parameters = {
-                            **default_algo_params,
-                            **(user_step_config.algorithm.parameters or {})
-                        }
+                        merged_parameters = default_algo_params + user_step_config.algorithm.parameters 
                         
                         algorithm_selection = AlgorithmSelection(
                             code=algorithm.code,
