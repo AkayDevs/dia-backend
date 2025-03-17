@@ -11,6 +11,8 @@ from .algorithms.cv_structure import CVTableStructureAlgorithm
 from .algorithms.msa_structure import MSATableStructureAlgorithm
 from .algorithms.ocr_data import OCRTableDataAlgorithm
 from .algorithms.docx_structure import DocxTableStructureAlgorithm
+from .algorithms.docx_data import DocxTableDataAlgorithm
+
 def register_components():
     """Register all table analysis components."""
     # Register analysis definition
@@ -33,6 +35,7 @@ def register_components():
     msa_structure_algo = MSATableStructureAlgorithm()
     ocr_data_algo = OCRTableDataAlgorithm()
     docx_structure_algo = DocxTableStructureAlgorithm()
+    docx_data_algo = DocxTableDataAlgorithm()
     
     # Register detection algorithms
     # AnalysisRegistry.register_algorithm(
@@ -61,5 +64,9 @@ def register_components():
     # Register data extraction algorithms
     AnalysisRegistry.register_algorithm(
         ocr_data_algo.get_info(),
+        f"{analysis_info.code}.{table_data_step.get_info().code}"
+    )
+    AnalysisRegistry.register_algorithm(
+        docx_data_algo.get_info(),
         f"{analysis_info.code}.{table_data_step.get_info().code}"
     )
