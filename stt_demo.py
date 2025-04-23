@@ -75,42 +75,76 @@ def load_pipeline(model_key):
         print(f"Using cached model: {model_key}") # Log
         return pipeline_cache[model_key]
 
-# --- Transcription Function (Generator with Log Capture) ---
-
-# --- Transcription Function (Generator with Incremental Log Capture) ---
+# --- Transcription Function (Generator with Log Capture & Mono Conversion) ---
 
 def transcribe_audio(model_key, audio_input):
     """
-    Transcribes audio, yields status updates, and captures/displays logs incrementally.
+    Transcribes audio, yields status updates, handles stereo input, and captures logs incrementally.
     Args:
         model_key (str): User-friendly name of the model selected.
-        audio_input (tuple or str): Audio data from Gradio component.
+        audio_input (tuple): Audio data from Gradio component (sr, np.array).
     Yields:
         dict: Updates for Gradio components (status, output, logs).
     """
-    status_updates = {}
+    status_updates = {} # Dictionary to hold updates for UI components
     final_transcription = ""
     error_message = ""
     logs = ""
     # Use a list to accumulate logs incrementally for yielding
     log_accumulator = []
-    log_stream = io.StringIO()
+    log_stream = io.StringIO() # Initialize log capture stream
 
     try:
-        # 1. Initial Status & Input Check
+        # 1. Initial Status & Input Check (Before log capture starts for this run)
         status_updates[status_output] = gr.update(value="⏳ Initializing...", interactive=False)
-        status_updates[output_textbox] = gr.update(value="", interactive=False)
+        status_updates[output_textbox] = gr.update(value="", interactive=False) # Clear previous output
         status_updates[log_output] = gr.update(value="") # Clear previous logs
-        yield status_updates
+        yield status_updates # Send initial updates to UI
 
+        # Check if audio_input is None (e.g., user didn't record or upload)
         if audio_input is None:
-             raise ValueError("No audio provided. Please upload a file or record audio.")
+            raise ValueError("No audio provided. Please upload a file or record audio.")
+        # Ensure audio_input is the expected tuple (sr, numpy_array) from type="numpy"
+        if not isinstance(audio_input, tuple) or len(audio_input) != 2:
+             raise TypeError(f"Unexpected audio input format: {type(audio_input)}. Expected (sample_rate, numpy_array).")
 
-        # --- Start Capturing Logs ---
+        sample_rate, audio_numpy = audio_input
+
+        # --- Start Capturing Logs for this run ---
         with redirect_stdout(log_stream), redirect_stderr(log_stream):
+            print(f"Processing numpy audio. Input SR: {sample_rate}, Input Shape: {audio_numpy.shape}") # Log
+
+            # Check if audio is valid numpy array and not empty
+            if not isinstance(audio_numpy, np.ndarray) or audio_numpy.size == 0:
+                raise ValueError("Recorded or loaded audio is empty or invalid.")
+
+            # --- >>> STEREO TO MONO CONVERSION <<< ---
+            # Check if the audio has more than one channel (ndim=2 and shape[1]>1)
+            if audio_numpy.ndim == 2 and audio_numpy.shape[1] > 1:
+                num_channels = audio_numpy.shape[1]
+                print(f"Detected {num_channels} channels. Converting to mono by averaging.") # Log
+                # Average across the channel axis (axis=1)
+                audio_numpy = np.mean(audio_numpy, axis=1)
+                print(f"Audio converted to mono. New shape: {audio_numpy.shape}") # Log
+            elif audio_numpy.ndim > 2:
+                 raise ValueError(f"Audio has unexpected dimensions: {audio_numpy.ndim}")
+            # --- >>> END OF CONVERSION <<< ---
+
+            # Ensure float32 type after potential conversion
+            audio_numpy = audio_numpy.astype(np.float32)
+
+            # Basic normalization (after potential mono conversion)
+            max_abs_val = np.max(np.abs(audio_numpy))
+            if max_abs_val == 0: # Check if audio is silent
+                 raise ValueError("Audio appears to be silent after processing.")
+            elif max_abs_val > 1.0: # Normalize if needed
+                print(f"Normalizing audio (max val: {max_abs_val:.2f})...") # Log
+                audio_numpy = audio_numpy / max_abs_val
+
             # 2. Load Model
+            # Yield status update *before* the potentially long operation
             yield {status_output: gr.update(value=f"🔄 Loading model: {model_key}...")}
-            asr_pipeline = load_pipeline(model_key) # This prints logs
+            asr_pipeline = load_pipeline(model_key) # This might take time and print logs
 
             # --- >>> Incremental Log Update Point <<< ---
             logs_after_loading = log_stream.getvalue()
@@ -120,71 +154,64 @@ def transcribe_audio(model_key, audio_input):
             # --- End Incremental Update ---
 
             # 3. Transcribe
+            # Yield status update *before* this potentially long operation
             yield {status_output: gr.update(value="🎙️ Model loaded. Transcribing audio...")}
 
             print("\n--- Starting Transcription ---") # Add separator in log
             start_time = time.time()
 
-            # Process audio input
-            if isinstance(audio_input, tuple):
-                sample_rate, audio_numpy = audio_input
-                print(f"Processing numpy audio. SR: {sample_rate}, Shape: {audio_numpy.shape}")
-                if audio_numpy is None or audio_numpy.size == 0: raise ValueError("Recorded/loaded audio is empty.")
-                audio_numpy = audio_numpy.astype(np.float32)
-                max_abs_val = np.max(np.abs(audio_numpy))
-                if max_abs_val > 1.0:
-                    print(f"Normalizing audio (max val: {max_abs_val:.2f})...")
-                    audio_numpy = audio_numpy / max_abs_val
-                elif max_abs_val == 0: raise ValueError("Audio appears to be silent.")
-                result = asr_pipeline({"sampling_rate": sample_rate, "raw": audio_numpy})
-            else:
-                raise TypeError(f"Unexpected audio input format: {type(audio_input)}. Expected numpy array.")
+            # Perform transcription using the processed (mono, normalized) numpy array
+            result = asr_pipeline({"sampling_rate": sample_rate, "raw": audio_numpy})
 
             end_time = time.time()
-            print(f"Transcription task finished in {end_time - start_time:.2f} seconds.")
+            print(f"Transcription task finished in {end_time - start_time:.2f} seconds.") # Log
 
             # Extract text result
             final_transcription = result.get('text', '').strip() if isinstance(result, dict) else str(result).strip()
             if not final_transcription:
                 final_transcription = "(No speech detected or model returned empty transcription)"
-                print("Result: No speech detected.")
+                print("Result: No speech detected.") # Log
             else:
-                 print(f"Result Preview: {final_transcription[:100]}...")
+                 print(f"Result Preview: {final_transcription[:100]}...") # Log first part of result
 
-            # --- Log Capture Ends Here ---
+            # --- Log Capture Ends Here (when 'with' block exits) ---
 
         # 4. Final Success Status (Append remaining logs and update UI)
         # Get only the logs generated *since the last update*
         current_logs = log_stream.getvalue()
-        logs_from_transcription = current_logs[len(logs_after_loading):]
+        # Check if logs_after_loading exists before slicing
+        logs_from_transcription = current_logs[len(logs_after_loading):] if 'logs_after_loading' in locals() else current_logs
         log_accumulator.append(logs_from_transcription)
         logs = "".join(log_accumulator) # Complete logs
 
         status_updates[status_output] = gr.update(value="✅ Transcription complete!")
         status_updates[output_textbox] = gr.update(value=final_transcription)
         status_updates[log_output] = gr.update(value=logs) # Update log display with ALL logs
-        yield status_updates
+        yield status_updates # Send final success updates
 
     except Exception as e:
         # --- Log Capture Ends Here on Error ---
-        print(f"ERROR encountered during process: {e}") # Log the error itself
-        logs = log_stream.getvalue() # Get everything captured up to the error
+        print(f"ERROR encountered during process: {e}") # This final print might go to original stdout
+
+        # Append error details to the captured logs
+        logs = log_stream.getvalue() # Get logs captured up to the error
         logs += f"\n\n--- ERROR ENCOUNTERED ---\n{type(e).__name__}: {e}" # Append error info
 
-        # Determine user-friendly error message
+        # Determine user-friendly error message for the main output
         if isinstance(e, FileNotFoundError): error_message = f"Error: {e}"
         elif isinstance(e, ValueError): error_message = f"Input Error: {e}"
-        elif "out of memory" in str(e).lower(): error_message = "Error: Out of memory."
-        elif "ffmpeg" in str(e).lower(): error_message = "Error: FFmpeg issue or audio format."
-        elif isinstance(e, RuntimeError) and "Failed to load model" in str(e): error_message = str(e)
-        else: error_message = f"An unexpected error occurred. Check logs. Error: {str(e)}"
+        elif "out of memory" in str(e).lower(): error_message = "Error: Out of memory. Model may be too large for available RAM/VRAM."
+        elif "ffmpeg" in str(e).lower(): error_message = "Error: FFmpeg issue or unsupported audio format. Ensure FFmpeg is installed."
+        elif isinstance(e, RuntimeError) and "Failed to load model" in str(e): error_message = str(e) # Use error from load_pipeline
+        else: error_message = f"An unexpected error occurred. Check logs for details. Error: {str(e)}"
 
-        # 5. Final Error Status
+        # 5. Final Error Status (Update UI after log capture)
         status_updates[status_output] = gr.update(value=f"❌ Error! See logs.")
-        status_updates[output_textbox] = gr.update(value=error_message)
-        status_updates[log_output] = gr.update(value=logs) # Display logs including error
-        yield status_updates
+        status_updates[output_textbox] = gr.update(value=error_message) # Show user-friendly error
+        status_updates[log_output] = gr.update(value=logs) # Display detailed logs including error
+        yield status_updates # Send final error updates
     finally:
+         # Ensure the log stream is closed
          log_stream.close()
 
 
@@ -230,7 +257,7 @@ with gr.Blocks(theme=theme, title="Speech-to-Text Pro Demo", css=css) as demo:
                 audio_input = gr.Audio(
                     label="Upload File or Record via Microphone",
                     sources=["upload", "microphone"],
-                    type="numpy", # Handles both sources, provides array & sr
+                    type="numpy", # Handles both sources well, provides (sr, np.array)
                     elem_id="audio_input"
                 )
                 gr.Markdown("### 3. Transcribe")
