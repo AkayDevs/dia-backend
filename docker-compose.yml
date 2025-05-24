@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  api:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./logs:/app/logs
+      - ./temp:/app/temp
+    environment:
+      - ENV=production
+      - SECRET_KEY=${SECRET_KEY:-defaultsecretkey}
+      - FIRST_SUPERUSER=${ADMIN_EMAIL:-admin@example.com}
+      - FIRST_SUPERUSER_PASSWORD=${ADMIN_PASSWORD:-admin123}
+      - BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS:-http://localhost:3000,http://localhost:8000}
+    restart: unless-stopped 

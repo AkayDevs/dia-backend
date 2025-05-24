@@ -1,0 +1,35 @@
+# Version control
+.git
+.gitignore
+
+# Virtual environments
+.venv
+venv
+env
+ENV
+
+# Development files
+.vscode
+.idea
+.DS_Store
+
+# Project files that should be mounted or generated at runtime
+uploads/*
+logs/*
+temp/*
+dia.db
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Don't ignore .gitkeep files
+!uploads/.gitkeep
+!logs/.gitkeep
+!temp/.gitkeep 
